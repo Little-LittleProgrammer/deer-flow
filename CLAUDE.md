@@ -19,6 +19,7 @@ DeerFlow is a full-stack "super agent harness" that orchestrates sub-agents, mem
 make check      # Check system requirements (Node.js 22+, pnpm, uv, nginx)
 make install    # Install all dependencies (frontend + backend)
 make config     # Generate local config files (first-time setup only)
+make config-upgrade  # Merge new fields from config.example.yaml into config.yaml
 make dev        # Start all services (LangGraph:2024, Gateway:8001, Frontend:3000, nginx:2026)
 make stop       # Stop all services
 ```
@@ -40,8 +41,11 @@ make format     # Format code with ruff
 pnpm dev        # Dev server with Turbopack (port 3000)
 pnpm build      # Production build (requires BETTER_AUTH_SECRET)
 pnpm lint       # ESLint only
+pnpm lint:fix   # ESLint with auto-fix
 pnpm typecheck  # TypeScript type check
 ```
+
+Note: `pnpm check` is broken (incompatible `next lint` invocation). Use `pnpm lint && pnpm typecheck` instead.
 
 ### Running a Single Backend Test
 
@@ -54,7 +58,7 @@ PYTHONPATH=. uv run pytest tests/test_<feature>.py -v
 
 ### Service Topology
 
-```
+```text
 Browser → nginx (port 2026) ← Unified entry point
            ├→ Frontend (port 3000) ← / (non-API requests)
            ├→ Gateway API (port 8001) ← /api/models, /api/mcp, /api/skills, /api/threads/*/artifacts
@@ -63,7 +67,7 @@ Browser → nginx (port 2026) ← Unified entry point
 
 ### Project Structure
 
-```
+```text
 deer-flow/
 ├── Makefile                    # Root commands
 ├── config.yaml                 # Main application configuration
@@ -108,6 +112,7 @@ The backend has a strict dependency boundary:
 Location: Project root (recommended) or `backend/` directory.
 
 Key sections:
+
 - `models[]` - LLM configurations with `use` class path, `supports_thinking`, `supports_vision`
 - `sandbox.use` - Sandbox provider class path
 - `skills.path` - Host path to skills directory
@@ -117,11 +122,14 @@ Key sections:
 
 Config values starting with `$` are resolved as environment variables (e.g., `$OPENAI_API_KEY`).
 
+Config has versioning: `config.example.yaml` has a `config_version` field. On startup, if user version is outdated, a warning is emitted. Run `make config-upgrade` to auto-merge missing fields.
+
 ### Extensions Config (`extensions_config.json`)
 
 Location: Project root (recommended) or `backend/` directory.
 
 Contains:
+
 - `mcpServers` - MCP server configurations
 - `skills` - Skill enabled states
 
@@ -153,6 +161,7 @@ Every new feature or bug fix MUST be accompanied by unit tests:
 ### Documentation Update Policy
 
 When making code changes, update relevant documentation:
+
 - `README.md` for user-facing changes
 - `backend/CLAUDE.md` for backend architecture changes
 - `frontend/CLAUDE.md` for frontend architecture changes
@@ -207,9 +216,12 @@ DEER_FLOW_EXTENSIONS_CONFIG_PATH=/path/to/extensions_config.json
 - Proxy env vars can break frontend `pnpm install`
 - `make config` aborts if `config.yaml` already exists (by design)
 - IM channels in Docker Compose use container service names (`http://langgraph:2024`), not `localhost`
+- `pnpm check` is broken — use `pnpm lint && pnpm typecheck` instead
+- `make dev` includes process cleanup and can emit shutdown logs if interrupted; this is expected
 
 ## Detailed Architecture
 
 For comprehensive architecture details, see:
+
 - [backend/CLAUDE.md](backend/CLAUDE.md) — Backend architecture, agent system, middleware chain, sandbox, MCP, memory
 - [frontend/CLAUDE.md](frontend/CLAUDE.md) — Frontend architecture, components, data flow, code style

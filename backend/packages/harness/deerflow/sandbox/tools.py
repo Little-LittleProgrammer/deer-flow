@@ -15,7 +15,12 @@ from deerflow.sandbox.exceptions import (
 )
 from deerflow.sandbox.sandbox import Sandbox
 from deerflow.sandbox.sandbox_provider import get_sandbox_provider
-from deerflow.sandbox.security import LOCAL_HOST_BASH_DISABLED_MESSAGE, is_host_bash_allowed
+from deerflow.sandbox.security import (
+    LOCAL_HOST_BASH_DISABLED_MESSAGE,
+    SANDBOX_GIT_BLOCKED_MESSAGE,
+    is_git_write_command,
+    is_host_bash_allowed,
+)
 
 _ABSOLUTE_PATH_PATTERN = re.compile(r"(?<![:\w])/(?:[^\s\"'`;&|<>()]+)")
 _LOCAL_BASH_SYSTEM_PATH_PREFIXES = (
@@ -771,6 +776,10 @@ def bash_tool(runtime: ToolRuntime[ContextT, ThreadState], description: str, com
         command: The bash command to execute. Always use absolute paths for files and directories.
     """
     try:
+        # Block git write operations regardless of sandbox mode (Framework-Delegated Git)
+        if is_git_write_command(command):
+            return f"Error: {SANDBOX_GIT_BLOCKED_MESSAGE}"
+
         sandbox = ensure_sandbox_initialized(runtime)
         if is_local_sandbox(runtime):
             if not is_host_bash_allowed():

@@ -6,6 +6,7 @@ import { type PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { ArtifactTrigger } from "@/components/workspace/artifacts";
 import {
   ChatBox,
+  HumanApprovalBanner,
   useSpecificChatMode,
   useThreadChat,
 } from "@/components/workspace/chats";
@@ -121,6 +122,7 @@ export default function ChatPage() {
                     />
                   </div>
                 </div>
+                <HumanApprovalBanner thread={thread} threadId={threadId} />
                 <InputBox
                   className={cn("bg-background/5 w-full -translate-y-4")}
                   isNewThread={isNewThread}

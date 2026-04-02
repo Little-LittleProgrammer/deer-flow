@@ -12,7 +12,7 @@
 # ============================================================================
 # 当配置模式变更时增加此数字
 # 运行 `make config-upgrade` 将新字段合并到您的本地 config.yaml 中
-config_version: 4
+config_version: 5
 
 # ============================================================================
 # 日志配置
@@ -403,6 +403,14 @@ sandbox:
 #   #   DEBUG: "false"
 #   #   API_KEY: $MY_API_KEY        # 从主机的 MY_API_KEY 环境变量读取
 #   #   DATABASE_URL: $DATABASE_URL  # 从主机的 DATABASE_URL 环境变量读取
+#   #
+#   #   # R&D 工作流规划模式需要以下飞书凭据，以便 Agent 在沙盒内使用 lark-cli Skill
+#   #   FEISHU_APP_ID: $FEISHU_APP_ID
+#   #   FEISHU_APP_SECRET: $FEISHU_APP_SECRET
+#   #   FEISHU_MCP_TOKEN: $FEISHU_MCP_TOKEN
+#   #   # 飞书项目空间 Key，用于需求列表 API（/api/lark/requirements）
+#   #   # 从飞书项目 URL 中提取：https://project.feishu.cn/{project_key}/...
+#   #   FEISHU_PROJECT_KEY: $FEISHU_PROJECT_KEY
 
 # 选项 3：Provisioner 管理的 AIO 沙箱（docker-compose-dev）
 # 每个 sandbox_id 在 k3s 中获得专用 Pod，由 provisioner 管理
@@ -578,6 +586,28 @@ checkpointer:
 # checkpointer:
 #   type: postgres
 #   connection_string: postgresql://user:password@localhost:5432/deerflow
+
+# ============================================================================
+# Codeup 配置
+# ============================================================================
+# 阿里云 Codeup 代码托管集成配置
+# 用于研发工作流中的仓库克隆、分支创建和 MR 创建
+
+# codeup:
+#   # Codeup 个人访问令牌（Personal Access Token），用于 x-yunxiao-token 认证
+#   token: $CODEUP_TOKEN
+#
+#   # Codeup API 域名（不含协议前缀）
+#   # 获取方式：https://help.aliyun.com/zh/yunxiao/developer-reference/service-access-point-domain
+#   domain: $CODEUP_DOMAIN
+#
+#   # 可选：中心版需要的组织 ID（Region 版不需要）
+#   # organization_id: $CODEUP_ORGANIZATION_ID
+#
+#   # 仓库 HTTPS Clone URL 模板，用于 git clone 时嵌入 PAT 认证
+#   # 格式示例：https://{token}@{domain}/{org}/{repo}.git
+#   # 实际使用时 {token}、{repo} 会被替换为真实值
+#   clone_url_template: $CODEUP_CLONE_URL_TEMPLATE
 
 # ============================================================================
 # IM 渠道配置

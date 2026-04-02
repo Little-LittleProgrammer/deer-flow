@@ -142,6 +142,18 @@ from deerflow.config import get_app_config
 - Extends `AgentState` with: `sandbox`, `thread_data`, `title`, `artifacts`, `todos`, `uploaded_files`, `viewed_images`
 - Uses custom reducers: `merge_artifacts` (deduplicate), `merge_viewed_images` (merge/clear)
 
+**R&D Workflow Graph** (`packages/harness/deerflow/agents/rd_workflow/`):
+- Entry point: `make_rd_workflow_graph(config)` registered in `langgraph.json` as `"rd_workflow"`
+- Triggered when a thread is created with metadata `type: "lark_requirement_task"`
+- Graph state defined in `state.py` as `RDWorkflowState` TypedDict
+- Node responsibilities (`nodes.py`):
+  1. `init_workspace_node` — Clones Codeup repositories via authenticated HTTPS, creates `feature/{requirement_id}` branch
+  2. `planning_node` — If `work_mode == "planning"`, generates a technical design doc via an Agent in the sandbox; otherwise pass-through
+  3. `human_approval_node` — Calls `langgraph.types.interrupt()` to pause execution and surface technical design for human review. Resume with `Command(resume="approved")` or `Command(resume="rejected")`
+  4. `development_node` — Executes coding tasks in sandbox; framework performs `git add && git commit` after each task (Git write ops are blocked inside the sandbox)
+  5. `delivery_node` — Framework performs `git push`, calls `CodeupClient.create_change_request()` to open an MR
+- Git write operations (`commit`, `push`, `rebase`, etc.) are blocked inside the sandbox via `is_git_write_command()` in `sandbox/security.py`; only the framework nodes can modify the Git history
+
 **Runtime Configuration** (via `config.configurable`):
 - `thinking_enabled` - Enable model's extended thinking
 - `model_name` - Select specific LLM model

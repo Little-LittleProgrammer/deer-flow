@@ -11,6 +11,8 @@ from app.gateway.routers import (
     artifacts,
     assistants_compat,
     channels,
+    codeup,
+    lark,
     mcp,
     memory,
     models,
@@ -149,6 +151,14 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
                 "description": "Manage IM channel integrations (Feishu, Slack, Telegram)",
             },
             {
+                "name": "lark",
+                "description": "Feishu/Lark Project integration - pull requirements via FeishuProjectMcp",
+            },
+            {
+                "name": "codeup",
+                "description": "Alibaba Cloud Codeup integration - list repositories for R&D workflow dispatch",
+            },
+            {
                 "name": "assistants-compat",
                 "description": "LangGraph Platform-compatible assistants API (stub)",
             },
@@ -195,6 +205,12 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
 
     # Channels API is mounted at /api/channels
     app.include_router(channels.router)
+
+    # Lark (Feishu) API is mounted at /api/lark
+    app.include_router(lark.router)
+
+    # Codeup API is mounted at /api/codeup
+    app.include_router(codeup.router)
 
     # Assistants compatibility API (LangGraph Platform stub)
     app.include_router(assistants_compat.router)

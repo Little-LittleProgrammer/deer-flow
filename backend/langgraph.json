@@ -6,7 +6,8 @@
   ],
   "env": ".env",
   "graphs": {
-    "lead_agent": "deerflow.agents:make_lead_agent"
+    "lead_agent": "deerflow.agents:make_lead_agent",
+    "rd_workflow": "deerflow.agents.rd_workflow:make_rd_workflow_graph"
   },
   "checkpointer": {
     "path": "./packages/harness/deerflow/agents/checkpointer/async_provider.py:make_checkpointer"

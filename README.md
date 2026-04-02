@@ -373,6 +373,38 @@ FEISHU_APP_ID=cli_xxxx
 FEISHU_APP_SECRET=your_app_secret
 ```
 
+### R&D Workflow Integration (Feishu Project + Codeup)
+
+The [R&D Workflow](#) feature enables AI-assisted development cycle management, integrating Feishu Project requirements with Alibaba Cloud Codeup code hosting.
+
+Add the following to your `.env` file:
+
+```bash
+# Feishu Project MCP (for pulling requirements from Feishu Project)
+FEISHU_MCP_TOKEN=your_feishu_project_mcp_token
+
+# Codeup / Alibaba Cloud DevOps (for repository management and MR creation)
+CODEUP_TOKEN=pt-your_personal_access_token
+CODEUP_DOMAIN=devops.aliyun.com          # or your private deployment domain
+# CODEUP_ORGANIZATION_ID=your_org_id     # required for central-edition Codeup only
+CODEUP_CLONE_URL_TEMPLATE=https://{token}@{domain}/{org}/{repo}.git
+```
+
+To obtain these credentials:
+- **`FEISHU_MCP_TOKEN`**: In Feishu Project → Settings → Integrations, generate an MCP Token.
+- **`CODEUP_TOKEN`**: In Alibaba Cloud DevOps → Personal Settings → Personal Access Tokens, create a token with `read_repository` and `write_repository` scopes.
+- **`CODEUP_DOMAIN`**: Your DevOps service access point, e.g. `devops.aliyun.com`. See [Service Access Point Domains](https://help.aliyun.com/zh/yunxiao/developer-reference/service-access-point-domain).
+
+For the R&D planning workflow, agents running inside the sandbox also need Feishu credentials to call `lark-cli`. Add these to the `sandbox.environment` section in `config.yaml`:
+
+```yaml
+sandbox:
+  environment:
+    FEISHU_APP_ID: $FEISHU_APP_ID
+    FEISHU_APP_SECRET: $FEISHU_APP_SECRET
+    FEISHU_MCP_TOKEN: $FEISHU_MCP_TOKEN
+```
+
 **Telegram Setup**
 
 1. Chat with [@BotFather](https://t.me/BotFather), send `/newbot`, and copy the HTTP API token.

@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from deerflow.config.acp_config import load_acp_config_from_dict
 from deerflow.config.checkpointer_config import CheckpointerConfig, load_checkpointer_config_from_dict
+from deerflow.config.codeup_config import CodeupConfig
 from deerflow.config.extensions_config import ExtensionsConfig
 from deerflow.config.guardrails_config import load_guardrails_config_from_dict
 from deerflow.config.memory_config import load_memory_config_from_dict
@@ -43,6 +44,7 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=False)
     checkpointer: CheckpointerConfig | None = Field(default=None, description="Checkpointer configuration")
     stream_bridge: StreamBridgeConfig | None = Field(default=None, description="Stream bridge configuration")
+    codeup: CodeupConfig = Field(default_factory=CodeupConfig, description="Codeup integration configuration for R&D workflow")
 
     @classmethod
     def resolve_config_path(cls, config_path: str | None = None) -> Path:

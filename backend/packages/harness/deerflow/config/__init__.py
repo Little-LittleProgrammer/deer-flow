@@ -1,4 +1,5 @@
 from .app_config import get_app_config
+from .codeup_config import CodeupConfig
 from .extensions_config import ExtensionsConfig, get_extensions_config
 from .memory_config import MemoryConfig, get_memory_config
 from .paths import Paths, get_paths
@@ -16,4 +17,5 @@ __all__ = [
     "get_memory_config",
     "get_tracing_config",
     "is_tracing_enabled",
+    "CodeupConfig",
 ]
