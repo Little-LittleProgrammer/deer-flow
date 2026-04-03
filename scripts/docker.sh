@@ -12,8 +12,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DOCKER_DIR="$PROJECT_ROOT/docker"
 
-# Docker Compose command with project name
-COMPOSE_CMD="docker compose -p deer-flow-dev -f docker-compose-dev.yaml"
+# Detect container runtime: prefer docker, fall back to podman
+_CONTAINER_RUNTIME=""
+_detect_runtime() {
+    if [ -n "$_CONTAINER_RUNTIME" ]; then
+        return
+    fi
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+        _CONTAINER_RUNTIME="docker"
+    elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+        _CONTAINER_RUNTIME="podman"
+    else
+        _CONTAINER_RUNTIME=""
+    fi
+}
+
+# Docker Compose command with project name (runtime-aware)
+_get_compose_cmd() {
+    _detect_runtime
+    local runtime="${_CONTAINER_RUNTIME:-docker}"
+    echo "$runtime compose -p deer-flow-dev -f docker-compose-dev.yaml"
+}
+COMPOSE_CMD="$(_get_compose_cmd)"
 
 detect_sandbox_mode() {
     local config_file="$PROJECT_ROOT/config.yaml"
@@ -71,17 +91,8 @@ cleanup() {
 trap cleanup INT TERM
 
 docker_available() {
-    # Check that the docker CLI exists
-    if ! command -v docker >/dev/null 2>&1; then
-        return 1
-    fi
-
-    # Check that the Docker daemon is reachable
-    if ! docker info >/dev/null 2>&1; then
-        return 1
-    fi
-
-    return 0
+    _detect_runtime
+    [ -n "$_CONTAINER_RUNTIME" ]
 }
 
 # Initialize: pre-pull the sandbox image so first Pod startup is fast
@@ -116,11 +127,13 @@ init() {
         return 0
     fi
 
-    if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${SANDBOX_IMAGE}$"; then
+    _detect_runtime
+    local runtime="${_CONTAINER_RUNTIME:-docker}"
+    if ! $runtime images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${SANDBOX_IMAGE}$"; then
         echo -e "${BLUE}Pulling sandbox image: $SANDBOX_IMAGE ...${NC}"
         echo ""
 
-        if ! docker pull "$SANDBOX_IMAGE" 2>&1; then
+        if ! $runtime pull "$SANDBOX_IMAGE" 2>&1; then
             echo ""
             echo -e "${YELLOW}⚠ Failed to pull sandbox image.${NC}"
             echo ""
@@ -211,6 +224,17 @@ start() {
             echo "{}" > "$PROJECT_ROOT/extensions_config.json"
             echo -e "${BLUE}Created empty extensions_config.json${NC}"
         fi
+    fi
+
+    # Ensure env files referenced in docker-compose exist.
+    # podman-compose (unlike docker compose) requires env_file paths to exist.
+    if [ ! -f "$PROJECT_ROOT/.env" ]; then
+        touch "$PROJECT_ROOT/.env"
+        echo -e "${BLUE}Created empty .env${NC}"
+    fi
+    if [ ! -f "$PROJECT_ROOT/frontend/.env" ]; then
+        touch "$PROJECT_ROOT/frontend/.env"
+        echo -e "${BLUE}Created empty frontend/.env${NC}"
     fi
 
     echo "Building and starting containers..."
