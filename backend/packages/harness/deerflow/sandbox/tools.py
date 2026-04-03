@@ -22,7 +22,7 @@ from deerflow.sandbox.security import (
     is_host_bash_allowed,
 )
 
-_ABSOLUTE_PATH_PATTERN = re.compile(r"(?<![:\w])/(?:[^\s\"'`;&|<>()]+)")
+_ABSOLUTE_PATH_PATTERN = re.compile(r"(?<![:\w/])/(?:[^\s\"'`;&|<>()]+)")
 _LOCAL_BASH_SYSTEM_PATH_PREFIXES = (
     "/bin/",
     "/usr/bin/",

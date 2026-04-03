@@ -193,3 +193,32 @@ def test_from_config_success() -> None:
         client = CodeupClient.from_config()
         assert client._token == "pt-test"
         assert client._domain == "devops.aliyun.com"
+
+
+def test_codeup_config_accepts_yunxiao_token_alias() -> None:
+    from deerflow.config.codeup_config import CodeupConfig
+
+    cfg = CodeupConfig.model_validate({"yunxiao_token": "pt-x", "domain": "d.example.com", "enabled": True})
+    assert cfg.token == "pt-x"
+    assert cfg.domain == "d.example.com"
+
+
+def test_merge_enterprise_connectors_codeup_hoists_nested() -> None:
+    from deerflow.config.app_config import merge_enterprise_connectors_codeup
+
+    data: dict = {
+        "enterprise_connectors": {"codeup": {"yunxiao_token": "pt-nested", "domain": "nested.example.com"}},
+    }
+    merge_enterprise_connectors_codeup(data)
+    assert data["codeup"] == {"yunxiao_token": "pt-nested", "domain": "nested.example.com"}
+
+
+def test_merge_enterprise_connectors_codeup_top_level_overrides() -> None:
+    from deerflow.config.app_config import merge_enterprise_connectors_codeup
+
+    data: dict = {
+        "enterprise_connectors": {"codeup": {"yunxiao_token": "old", "domain": "a.com"}},
+        "codeup": {"token": "pt-top", "domain": "b.com"},
+    }
+    merge_enterprise_connectors_codeup(data)
+    assert data["codeup"] == {"yunxiao_token": "old", "domain": "b.com", "token": "pt-top"}

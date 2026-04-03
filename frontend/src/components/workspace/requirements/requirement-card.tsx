@@ -65,15 +65,26 @@ export function RequirementCard({ requirement, onDispatch }: RequirementCardProp
         </div>
       </CardHeader>
       <CardContent className="pt-0">
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {requirement.priority && <span className="shrink-0">优先级: {requirement.priority}</span>}
+          {requirement.business_line && (
+            <span className="truncate max-w-[14rem]" title={requirement.business_line}>
+              业务线: {requirement.business_line}
+            </span>
+          )}
+          {requirement.feature_module && <span className="shrink-0">模块: {requirement.feature_module}</span>}
           {requirement.assignee && (
-            <div className="flex items-center gap-1">
-              <UserIcon className="size-3" />
-              <span>{requirement.assignee}</span>
+            <div className="flex items-center gap-1 min-w-0 max-w-[20rem]">
+              <UserIcon className="size-3 shrink-0" />
+              <span className="truncate" title={requirement.assignee}>
+                {requirement.assignee}
+              </span>
             </div>
           )}
           {requirement.iteration && (
-            <span className="truncate">迭代: {requirement.iteration}</span>
+            <span className="truncate max-w-[18rem]" title={requirement.iteration}>
+              迭代: {requirement.iteration}
+            </span>
           )}
           {requirement.doc_url && (
             <a

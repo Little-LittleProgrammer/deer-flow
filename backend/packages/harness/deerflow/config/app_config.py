@@ -11,6 +11,7 @@ from deerflow.config.acp_config import load_acp_config_from_dict
 from deerflow.config.checkpointer_config import CheckpointerConfig, load_checkpointer_config_from_dict
 from deerflow.config.codeup_config import CodeupConfig
 from deerflow.config.extensions_config import ExtensionsConfig
+from deerflow.config.feishu_project_config import FeishuProjectConfig
 from deerflow.config.guardrails_config import load_guardrails_config_from_dict
 from deerflow.config.memory_config import load_memory_config_from_dict
 from deerflow.config.model_config import ModelConfig
@@ -29,6 +30,22 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+def merge_enterprise_connectors_codeup(config_data: dict) -> None:
+    """Merge ``enterprise_connectors.codeup`` into top-level ``codeup`` for :class:`AppConfig` parsing.
+
+    Top-level ``codeup`` keys override nested ones when both are present.
+    """
+    ec = config_data.get("enterprise_connectors")
+    if not isinstance(ec, dict):
+        return
+    nested_codeup = ec.get("codeup")
+    if not isinstance(nested_codeup, dict):
+        return
+    top_codeup = config_data.get("codeup")
+    top_dict = top_codeup if isinstance(top_codeup, dict) else {}
+    config_data["codeup"] = {**nested_codeup, **top_dict}
+
+
 class AppConfig(BaseModel):
     """Config for the DeerFlow application"""
 
@@ -45,6 +62,7 @@ class AppConfig(BaseModel):
     checkpointer: CheckpointerConfig | None = Field(default=None, description="Checkpointer configuration")
     stream_bridge: StreamBridgeConfig | None = Field(default=None, description="Stream bridge configuration")
     codeup: CodeupConfig = Field(default_factory=CodeupConfig, description="Codeup integration configuration for R&D workflow")
+    feishu_project: FeishuProjectConfig = Field(default_factory=FeishuProjectConfig, description="Feishu Project integration configuration for requirements list API")
 
     @classmethod
     def resolve_config_path(cls, config_path: str | None = None) -> Path:
@@ -130,6 +148,8 @@ class AppConfig(BaseModel):
 
         # Always refresh ACP agent config so removed entries do not linger across reloads.
         load_acp_config_from_dict(config_data.get("acp_agents", {}))
+
+        merge_enterprise_connectors_codeup(config_data)
 
         # Load extensions config separately (it's in a different file)
         extensions_config = ExtensionsConfig.from_file()

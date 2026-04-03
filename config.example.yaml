@@ -588,6 +588,32 @@ checkpointer:
 #   connection_string: postgresql://user:password@localhost:5432/deerflow
 
 # ============================================================================
+# 飞书项目配置 (Feishu Project)
+# ============================================================================
+# 用于需求列表 API（/api/lark/requirements），通过 FeishuProjectMcp 查询工作项
+# project_key 从飞书项目 URL 中提取：https://project.feishu.cn/{project_key}/...
+
+# feishu_project:
+#   # 飞书项目空间 Key（必填）
+#   # 直接填写值，或使用 $FEISHU_PROJECT_KEY 引用环境变量
+#   # 从 URL 中提取：https://project.feishu.cn/{project_key}/...
+#   project_key: $FEISHU_PROJECT_KEY
+#
+#   # 视图 ID（必填），通过 get_view_detail 工具获取该视图下的所有工作项
+#   # 从 URL 中提取：https://project.feishu.cn/.../storyView/{view_id}
+#   # 也可使用 $FEISHU_PROJECT_VIEW_ID 引用环境变量
+#   view_id: $FEISHU_PROJECT_VIEW_ID
+#
+#   # 可选：视图中要获取的字段列表（支持字段 key 或显示名称）
+#   # 默认值如下，wiki 对应「需求文档」链接字段
+#   # view_fields:
+#   #   - 工作项ID
+#   #   - 名称
+#   #   - wiki
+#   #   - 状态
+#   #   - 当前负责人
+
+# ============================================================================
 # Codeup 配置
 # ============================================================================
 # 阿里云 Codeup 代码托管集成配置

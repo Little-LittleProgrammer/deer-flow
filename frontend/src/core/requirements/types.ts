@@ -11,6 +11,12 @@ export interface LarkRequirement {
   assignee: string | null;
   doc_url: string | null;
   iteration: string | null;
+  /** 业务线 */
+  business_line: string | null;
+  /** 功能模块 */
+  feature_module: string | null;
+  /** 优先级 */
+  priority: string | null;
 }
 
 export interface CodeupRepository {
@@ -24,4 +30,4 @@ export interface CodeupRepository {
   archived: boolean;
 }
 
-export type WorkMode = "planning" | "development";
+export type WorkMode = "requirement-review" | "planning" | "development";

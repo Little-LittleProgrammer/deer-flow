@@ -232,6 +232,22 @@ def test_validate_local_bash_command_paths_blocks_host_paths() -> None:
         validate_local_bash_command_paths("cat /etc/passwd", _THREAD_DATA)
 
 
+def test_validate_local_bash_command_paths_allows_https_urls() -> None:
+    """URLs like https://github.com/... must not be flagged as unsafe absolute paths."""
+    validate_local_bash_command_paths(
+        "cd /mnt/user-data/workspace && git clone https://github.com/CherryHQ/cherry-studio.git",
+        _THREAD_DATA,
+    )
+
+
+def test_validate_local_bash_command_paths_allows_http_urls() -> None:
+    """HTTP URLs must not be flagged as unsafe absolute paths."""
+    validate_local_bash_command_paths(
+        "curl http://example.com/file.tar.gz -o /mnt/user-data/workspace/file.tar.gz",
+        _THREAD_DATA,
+    )
+
+
 def test_validate_local_bash_command_paths_allows_virtual_and_system_paths() -> None:
     validate_local_bash_command_paths(
         "/bin/echo ok > /mnt/user-data/workspace/out.txt && cat /dev/null",

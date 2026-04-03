@@ -1,6 +1,6 @@
 """Codeup integration configuration."""
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class CodeupConfig(BaseModel):
@@ -9,9 +9,12 @@ class CodeupConfig(BaseModel):
     Used by the R&D workflow for repository cloning, branch management, and MR creation.
     """
 
+    model_config = ConfigDict(extra="ignore")
+
     token: str = Field(
         default="",
-        description="Codeup Personal Access Token (x-yunxiao-token). Set via CODEUP_TOKEN env var.",
+        validation_alias=AliasChoices("token", "yunxiao_token"),
+        description="Codeup Personal Access Token (x-yunxiao-token). Set via CODEUP_TOKEN env var, or yunxiao_token under enterprise_connectors.codeup.",
     )
     domain: str = Field(
         default="",
