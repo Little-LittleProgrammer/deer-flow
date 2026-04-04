@@ -42,6 +42,53 @@ def test_replace_virtual_path_maps_virtual_root_and_subpaths() -> None:
     assert Path(replace_virtual_path("/mnt/user-data", _THREAD_DATA)).as_posix() == "/tmp/deer-flow/threads/t1/user-data"
 
 
+def test_replace_virtual_path_preserves_trailing_slash() -> None:
+    """Trailing slash must survive virtual-to-actual path replacement.
+
+    Regression: '/mnt/user-data/workspace/' was previously returned without
+    the trailing slash, causing string concatenations like
+    output_dir + 'file.txt' to produce a missing-separator path.
+    """
+    result = replace_virtual_path("/mnt/user-data/workspace/", _THREAD_DATA)
+    assert result.endswith("/"), f"Expected trailing slash, got: {result!r}"
+    assert result == "/tmp/deer-flow/threads/t1/user-data/workspace/"
+
+
+def test_replace_virtual_path_preserves_trailing_slash_windows_style() -> None:
+    """Trailing slash must be preserved as backslash when actual_base is Windows-style.
+
+    If actual_base uses backslash separators, appending '/' would produce a
+    mixed-separator path.  The separator must match the style of actual_base.
+    """
+    win_thread_data = {
+        "workspace_path": r"C:\deer-flow\threads\t1\user-data\workspace",
+        "uploads_path": r"C:\deer-flow\threads\t1\user-data\uploads",
+        "outputs_path": r"C:\deer-flow\threads\t1\user-data\outputs",
+    }
+    result = replace_virtual_path("/mnt/user-data/workspace/", win_thread_data)
+    assert result.endswith("\\"), f"Expected trailing backslash for Windows path, got: {result!r}"
+    assert "/" not in result, f"Mixed separators in Windows path: {result!r}"
+
+
+def test_replace_virtual_path_preserves_windows_style_for_nested_subdir_trailing_slash() -> None:
+    """Nested Windows-style subdirectories must keep backslashes throughout."""
+    win_thread_data = {
+        "workspace_path": r"C:\deer-flow\threads\t1\user-data\workspace",
+        "uploads_path": r"C:\deer-flow\threads\t1\user-data\uploads",
+        "outputs_path": r"C:\deer-flow\threads\t1\user-data\outputs",
+    }
+    result = replace_virtual_path("/mnt/user-data/workspace/subdir/", win_thread_data)
+    assert result == "C:\\deer-flow\\threads\\t1\\user-data\\workspace\\subdir\\"
+    assert "/" not in result, f"Mixed separators in Windows path: {result!r}"
+
+
+def test_replace_virtual_paths_in_command_preserves_trailing_slash() -> None:
+    """Trailing slash on a virtual path inside a command must be preserved."""
+    cmd = """python -c "output_dir = '/mnt/user-data/workspace/'; print(output_dir + 'some_file.txt')"\""""
+    result = replace_virtual_paths_in_command(cmd, _THREAD_DATA)
+    assert "/tmp/deer-flow/threads/t1/user-data/workspace/" in result, f"Trailing slash lost in: {result!r}"
+
+
 # ---------- mask_local_paths_in_output ----------
 
 
