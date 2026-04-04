@@ -1,716 +1,765 @@
-# DeerFlow Harness 工程实现架构
+# DeerFlow Harness 实现架构原理
 
-> 本文档详细描述 Harness 框架包 (`deerflow-harness`) 的内部实现架构。
-
----
-
-## 一、概述
-
-**Harness** 是 DeerFlow 的核心 Agent 框架包，是一个**可独立发布**的 Python 包，提供了构建和运行 AI Agent 所需的全部能力。
-
-**核心定位**：
-- 可发布的框架包 (`backend/packages/harness/`)
-- 导入前缀: `deerflow.*`
-- 与 `app/` 层严格隔离：harness **不能**导入 app
-
-**模块结构**：
-
-```
-backend/packages/harness/deerflow/
-├── agents/              # Agent 系统
-│   ├── lead_agent/      # Lead Agent 入口工厂
-│   ├── middlewares/     # 14 个中间件组件
-│   ├── memory/          # 记忆系统
-│   └── thread_state.py  # ThreadState 状态定义
-├── sandbox/             # 沙箱执行系统
-├── subagents/           # 子代理委托系统
-├── tools/               # 工具系统
-│   └── builtins/        # 内置工具
-├── mcp/                 # MCP 集成
-├── models/              # LLM 模型工厂
-├── skills/              # Skills 发现系统
-├── config/              # 配置加载系统
-├── reflection/          # 动态模块加载
-├── runtime/             # 运行时支持
-├── community/           # 社区工具扩展
-├── guardrails/          # 工具调用授权
-└── client.py            # 嵌入式 Python 客户端
-```
+> 目标：从当前仓库实现出发，解释 DeerFlow Harness 如何把配置、Agent、工具、沙箱、子代理、持久化和流式运行时装配成一套可复用框架。
+>
+> 代码范围：以 `backend/packages/harness/deerflow/` 为主，必要时补充 `backend/app/gateway/` 的接入层实现。
 
 ---
 
-## 二、核心架构图
+## 1. 定位
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           DeerFlow Harness                                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                        Agent 系统                                    │    │
-│  │  ┌───────────────┐   ┌────────────────────────────────────────────┐ │    │
-│  │  │  Lead Agent   │ → │        Middleware Chain (14个中间件)        │ │    │
-│  │  │  (入口工厂)   │   │ ThreadData → Sandbox → Guardrails → ...    │ │    │
-│  │  └───────────────┘   └────────────────────────────────────────────┘ │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                    │                                         │
-│  ┌──────────────┬──────────────────┼──────────────────┬────────────────┐   │
-│  │              │                  │                  │                │   │
-│  ▼              ▼                  ▼                  ▼                ▼   │
-│ ┌────────┐ ┌──────────┐ ┌────────────────┐ ┌─────────────┐ ┌────────────┐ │
-│ │ Models │ │  Tools   │ │    Sandbox     │ │  Subagents  │ │    MCP     │ │
-│ │ Factory│ │  System  │ │    System      │ │   System    │ │  Integration│ │
-│ └────────┘ └──────────┘ └────────────────┘ └─────────────┘ └────────────┘ │
-│                                    │                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                        配置系统                                      │   │
-│  │  AppConfig (config.yaml) + ExtensionsConfig (extensions_config.json)│   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                      支撑系统                                        │   │
-│  │  Memory | Skills | Reflection | Runtime | Client                     │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────┘
+DeerFlow Harness 不是一个简单的“LLM + 工具列表”，而是一层 Agent 运行时内核。
+
+它负责：
+
+- 读取和拆分配置
+- 动态装配模型、工具、Prompt 和中间件
+- 维护线程级状态 `ThreadState`
+- 提供文件系统隔离与沙箱执行
+- 提供子代理委派能力
+- 提供 checkpoint/store/stream bridge/run manager 等运行时基础设施
+- 供 Gateway 和嵌入式 Python Client 复用
+
+因此更准确的理解是：
+
+- `backend/packages/harness` 是核心运行时
+- `backend/app/gateway` 是这套运行时的 HTTP/SSE 适配层
+
+---
+
+## 2. 总体分层
+
+从职责看，Harness 大致可以拆成 7 层：
+
+| 层 | 目录 | 作用 |
+|---|---|---|
+| 配置层 | `config/` | 解析 `config.yaml`、扩展配置和专项配置 |
+| 反射层 | `reflection/` | 把配置里的字符串路径解析成 Python 对象 |
+| Agent 装配层 | `agents/` | lead agent、状态模型、中间件链、prompt |
+| 能力层 | `tools/`、`mcp/`、`community/` | 普通工具、MCP 工具、社区能力 |
+| 执行环境层 | `sandbox/`、`subagents/` | 沙箱、文件系统隔离、子代理执行 |
+| 运行时层 | `runtime/`、`agents/checkpointer/` | run 生命周期、持久化、流式桥接 |
+| 接入层 | `client.py` | 进程内嵌入式调用 |
+
+可以把主链路理解成：
+
+```text
+配置
+  -> 模型/工具/Prompt/中间件装配
+  -> create_agent(...)
+  -> graph 执行
+  -> 状态写入 checkpointer/store
+  -> 事件写入 stream bridge
+  -> Gateway / Client 消费结果
 ```
 
 ---
 
-## 三、核心组件详解
+## 3. 启动与配置装载
 
-### 3.1 Agent 系统
+### 3.1 `AppConfig` 是总入口
 
-**入口文件**: `deerflow/agents/lead_agent/agent.py`
+主入口在 `deerflow/config/app_config.py` 的 `AppConfig.from_file()`。
 
-#### make_lead_agent() 工厂函数
+它不只是读 YAML，而是做一次总装配：
 
-```python
-def make_lead_agent(config: RunnableConfig) -> CompiledStateGraph:
-    # 1. 解析运行时配置
-    thinking_enabled = cfg.get("thinking_enabled", True)
-    model_name = cfg.get("model_name")
-    is_plan_mode = cfg.get("is_plan_mode", False)
-    subagent_enabled = cfg.get("subagent_enabled", False)
+1. 定位 `config.yaml`
+2. 读取 YAML
+3. 解析 `$ENV_VAR` 形式的环境变量引用
+4. 把 memory、summarization、guardrails、subagents、checkpointer、stream_bridge、tool_search 等配置分发到对应模块
+5. 额外读取 `ExtensionsConfig`
+6. 最终生成 `AppConfig`
 
-    # 2. 创建 LLM 模型
-    model = create_chat_model(name=model_name, thinking_enabled=thinking_enabled)
+这意味着 DeerFlow 的配置体系不是“一个大对象”，而是：
 
-    # 3. 加载工具集
-    tools = get_available_tools(model_name=model_name, subagent_enabled=subagent_enabled)
+- `AppConfig` 负责总入口
+- 多个专项配置模块负责各自的运行时开关和参数
 
-    # 4. 构建中间件链
-    middlewares = _build_middlewares(config, model_name=model_name)
+### 3.2 反射层让能力可插拔
 
-    # 5. 生成系统提示
-    system_prompt = apply_prompt_template(subagent_enabled=subagent_enabled, ...)
+`deerflow/reflection/resolvers.py` 提供：
 
-    # 6. 创建 Agent
-    return create_agent(
-        model=model,
-        tools=tools,
-        middleware=middlewares,
-        system_prompt=system_prompt,
-        state_schema=ThreadState,
-    )
-```
+- `resolve_variable("pkg.module:name")`
+- `resolve_class("pkg.module:Class")`
 
-#### ThreadState 状态结构
+模型类、工具对象、sandbox provider、guardrail provider 等，都是通过这种方式动态加载的。
 
-**文件**: `deerflow/agents/thread_state.py`
+这层的意义是：
 
-```python
-class ThreadState(AgentState):
-    sandbox: NotRequired[SandboxState | None]           # 沙箱 ID
-    thread_data: NotRequired[ThreadDataState | None]    # 线程数据路径
-    title: NotRequired[str | None]                      # 自动标题
-    artifacts: Annotated[list[str], merge_artifacts]    # 产物列表 (自动去重)
-    todos: NotRequired[list | None]                     # 任务列表
-    uploaded_files: NotRequired[list[dict] | None]      # 上传文件
-    viewed_images: Annotated[dict, merge_viewed_images] # 已查看图像
-```
-
-**自定义 Reducer**:
-
-```python
-def merge_artifacts(existing: list[str] | None, new: list[str] | None) -> list[str]:
-    """合并并去重 artifacts"""
-    if existing is None:
-        return new or []
-    if new is None:
-        return existing
-    return list(dict.fromkeys(existing + new))
-
-def merge_viewed_images(existing: dict | None, new: dict | None) -> dict:
-    """合并图像字典，空字典表示清空"""
-    if len(new) == 0:
-        return {}  # 特殊情况：清空
-    return {**existing, **new}
-```
+- 框架层不需要硬编码所有实现类
+- 新模型、新工具、新 provider 可以通过配置接入
 
 ---
 
-### 3.2 中间件链
+## 4. Agent 装配主链路
 
-**构建函数**: `_build_middlewares()` in `agent.py`
+### 4.1 两个入口函数
 
-#### 执行顺序
+Harness 里有两个关键入口：
 
-| 序号 | 中间件 | 职责 | 条件 |
-|------|--------|------|------|
-| 1 | `build_lead_runtime_middlewares()` | 基础运行时中间件组 | 始终 |
-| 2 | `SummarizationMiddleware` | 上下文摘要 | 配置启用 |
-| 3 | `TodoMiddleware` | 任务跟踪 | `is_plan_mode=True` |
-| 4 | `TokenUsageMiddleware` | Token 使用统计 | 配置启用 |
-| 5 | `TitleMiddleware` | 自动生成标题 | 始终 |
-| 6 | `MemoryMiddleware` | 对话记忆队列 | 始终 |
-| 7 | `ViewImageMiddleware` | 图像 base64 注入 | 模型支持视觉 |
-| 8 | `DeferredToolFilterMiddleware` | 工具延迟加载 | `tool_search.enabled` |
-| 9 | `SubagentLimitMiddleware` | 限制并发子代理 | `subagent_enabled=True` |
-| 10 | `LoopDetectionMiddleware` | 检测循环工具调用 | 始终 |
-| 11 | `ClarificationMiddleware` | 拦截澄清请求 | **必须最后** |
+#### `make_lead_agent(config)`
 
-#### 基础运行时中间件组
+位置：`deerflow/agents/lead_agent/agent.py`
 
-`build_lead_runtime_middlewares()` 包含:
+这是项目默认的应用级入口，负责 DeerFlow 的 lead agent 装配。
 
-1. **ThreadDataMiddleware** - 创建线程隔离目录
-2. **UploadsMiddleware** - 注入上传文件信息
-3. **SandboxMiddleware** - 获取沙箱环境
-4. **DanglingToolCallMiddleware** - 修复缺失的 ToolMessage
-5. **GuardrailMiddleware** - 工具调用授权 (可选)
-6. **ToolErrorHandling** - 工具异常处理
+#### `create_deerflow_agent(...)`
 
-#### SandboxMiddleware 示例
+位置：`deerflow/agents/factory.py`
 
-**文件**: `deerflow/sandbox/middleware.py`
+这是更偏 SDK 的入口，强调“纯参数装配”，用于不依赖完整应用配置的场景。
 
-```python
-class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
-    def __init__(self, lazy_init: bool = True):
-        self._lazy_init = lazy_init
+可以概括为：
 
-    def before_agent(self, state, runtime):
-        if self._lazy_init:
-            return  # 延迟初始化：首次工具调用时获取
-        thread_id = runtime.context.get("thread_id")
-        sandbox_id = self._acquire_sandbox(thread_id)
-        return {"sandbox": {"sandbox_id": sandbox_id}}
+- `make_lead_agent`：产品默认装配方式
+- `create_deerflow_agent`：框架复用方式
 
-    def after_agent(self, state, runtime):
-        sandbox = state.get("sandbox")
-        if sandbox:
-            get_sandbox_provider().release(sandbox["sandbox_id"])
+### 4.2 `make_lead_agent()` 做了什么
+
+`make_lead_agent()` 的关键步骤是：
+
+1. 从 `config.configurable` 读取运行时参数
+2. 解析 `model_name`、`thinking_enabled`、`reasoning_effort`、`is_plan_mode`、`subagent_enabled`、`agent_name`
+3. 读取自定义 agent 配置 `agents/<name>/config.yaml`
+4. 调用 `create_chat_model(...)`
+5. 调用 `get_available_tools(...)`
+6. 调用 `_build_middlewares(...)`
+7. 调用 `apply_prompt_template(...)`
+8. 最终 `create_agent(...)`
+
+所以它并不是“返回一个固定 agent”，而是根据运行时参数动态拼出一张图。
+
+### 4.3 自定义 agent 的实现方式
+
+自定义 agent 目录结构是：
+
+```text
+{DEER_FLOW_HOME}/agents/{agent_name}/
+├── config.yaml
+└── SOUL.md
 ```
+
+其中：
+
+- `config.yaml` 决定模型、tool_groups、skills
+- `SOUL.md` 注入 agent 的身份、风格和行为约束
+
+因此 DeerFlow 的多 agent 不是多套独立引擎，而是：
+
+- 同一个 lead agent 工厂
+- 通过 `agent_name` 注入不同 profile
 
 ---
 
-### 3.3 Sandbox 执行系统
+## 5. Prompt 组装原理
 
-#### 抽象接口
+位置：`deerflow/agents/lead_agent/prompt.py`
 
-**文件**: `deerflow/sandbox/sandbox.py`
+Prompt 在这里不是固定字符串，而是模板拼装结果。
 
-```python
-class Sandbox(ABC):
-    _id: str
+最终 system prompt 会动态插入这些 section：
 
-    @abstractmethod
-    def execute_command(self, command: str) -> str:
-        """执行 bash 命令"""
+- 基础角色说明
+- 当前日期与上下文
+- `SOUL.md`
+- memory context
+- skills section
+- deferred tools section
+- subagent section
+- 工作目录和文件管理约束
+- clarification 工作流约束
 
-    @abstractmethod
-    def read_file(self, path: str) -> str:
-        """读取文件内容"""
+这说明 Prompt 的作用不是单纯“告诉模型你是谁”，而是把多来源运行时约束统一投影成系统指令。
 
-    @abstractmethod
-    def write_file(self, path: str, content: str, append: bool = False):
-        """写入文件"""
+其中有两个点很关键：
 
-    @abstractmethod
-    def list_dir(self, path: str, max_depth=2) -> list[str]:
-        """列出目录内容"""
-```
+### 5.1 Skills 主要通过 Prompt 暴露给模型
 
-#### Provider 模式
+`deerflow/skills/loader.py` 扫描 `skills/public` 和 `skills/custom` 下的 `SKILL.md`，再结合扩展配置判断是否启用。
 
-```python
-class SandboxProvider(ABC):
-    def acquire(self, thread_id: str) -> str      # 获取沙箱
-    def get(self, sandbox_id: str) -> Sandbox     # 获取实例
-    def release(self, sandbox_id: str)            # 释放资源
-```
+这些 skills 更多是：
 
-#### 虚拟路径映射
+- 工作流说明
+- 任务处理规范
+- 专项知识注入
 
-```
-Agent 视角 (虚拟路径)              实际物理路径
-─────────────────────────────────────────────────────────────────
-/mnt/user-data/workspace      →    .deer-flow/threads/{id}/user-data/workspace
-/mnt/user-data/uploads        →    .deer-flow/threads/{id}/user-data/uploads
-/mnt/user-data/outputs        →    .deer-flow/threads/{id}/user-data/outputs
-/mnt/skills                   →    skills/ (项目根目录)
-/mnt/acp-workspace            →    .deer-flow/threads/{id}/acp-workspace
-```
+它们首先是 Prompt 资源，而不是自动注册成工具。
 
-**设计原理**: Agent 只看到统一的虚拟路径，物理路径由系统自动映射，实现线程隔离和跨平台兼容。
+### 5.2 Subagent 规则由 Prompt 和 Middleware 双重约束
 
-#### 实现类型
+Prompt 里会告诉模型如何拆任务、何时使用 `task` 工具、并发上限是多少；但真正的硬约束还会由 `SubagentLimitMiddleware` 执行。
 
-| 类型 | 类路径 | 使用场景 |
-|------|--------|----------|
-| **Local** | `deerflow.sandbox.local:LocalSandboxProvider` | 本地开发 |
-| **Docker** | `deerflow.community.aio_sandbox:AioSandboxProvider` | 生产环境 |
+这体现了 Harness 的一个核心策略：
 
-#### Sandbox 工具
-
-| 工具 | 函数 | 说明 |
-|------|------|------|
-| `bash` | `bash_tool()` | 执行命令 (带路径转换) |
-| `ls` | `ls_tool()` | 列出目录 (树形) |
-| `read_file` | `read_file_tool()` | 读取文件 |
-| `write_file` | `write_file_tool()` | 写入文件 |
-| `str_replace` | `str_replace_tool()` | 字符串替换 |
+- Prompt 负责引导
+- 系统层负责兜底
 
 ---
 
-### 3.4 Subagent 系统
+## 6. 状态模型：`ThreadState`
 
-#### SubagentConfig 结构
+位置：`deerflow/agents/thread_state.py`
 
-**文件**: `deerflow/subagents/config.py`
+Harness 的所有运行时能力都围绕一份统一状态展开，而不是散落在局部变量里。
 
-```python
-@dataclass
-class SubagentConfig:
-    name: str                    # 唯一标识
-    description: str             # 何时委托
-    system_prompt: str           # 行为指导
-    tools: list[str] | None      # 允许的工具
-    disallowed_tools: list[str]  # 禁止的工具
-    model: str = "inherit"       # 模型选择
-    max_turns: int = 50          # 最大轮次
-    timeout_seconds: int = 900   # 超时时间 (15分钟)
-```
+`ThreadState` 在默认消息状态之外，额外承载了：
 
-#### 内置子代理
+- `sandbox`
+- `thread_data`
+- `title`
+- `artifacts`
+- `todos`
+- `uploaded_files`
+- `viewed_images`
 
-| 名称 | 用途 | 工具限制 |
-|------|------|----------|
-| `general-purpose` | 复杂多步骤任务 | 禁止 `task`, `ask_clarification` |
-| `bash` | 命令执行专家 | 仅限 sandbox 工具 |
+这带来三个效果：
 
-#### SubagentExecutor 执行器
+1. 中间件之间可以通过统一状态协作
+2. checkpointer 可以直接持久化完整线程上下文
+3. 工具与 UI 呈现能力可以通过状态而不是隐式副作用对接
 
-**文件**: `deerflow/subagents/executor.py`
+### 6.1 Reducer 的意义
 
-```python
-class SubagentExecutor:
-    def __init__(self, config, tools, parent_model, sandbox_state, thread_data, ...):
-        self.tools = _filter_tools(tools, config.tools, config.disallowed_tools)
+像 `artifacts` 和 `viewed_images` 这类字段不是简单覆盖，而需要合并或去重。
 
-    def execute(self, task: str) -> SubagentResult:
-        """同步执行 (包装异步)"""
-        return asyncio.run(self._aexecute(task))
-
-    def execute_async(self, task: str) -> str:
-        """后台执行，返回 task_id"""
-        task_id = str(uuid.uuid4())[:8]
-        _scheduler_pool.submit(run_task)
-        return task_id
-```
-
-#### 双线程池架构
-
-```python
-_scheduler_pool = ThreadPoolExecutor(max_workers=3)   # 调度池
-_execution_pool = ThreadPoolExecutor(max_workers=3)   # 执行池
-MAX_CONCURRENT_SUBAGENTS = 3                           # 并发上限
-```
-
-#### 执行流程
-
-```
-Lead Agent 调用 task 工具
-    ↓
-SubagentExecutor 创建独立 Agent
-    ├─ 过滤工具 (允许/禁止列表)
-    ├─ 继承 sandbox/thread_data
-    └─ 设置独立系统提示
-    ↓
-_scheduler_pool 提交任务
-    ↓
-_execution_pool 执行 (超时控制 15min)
-    ↓
-轮询结果 (5s 间隔)
-    ↓
-返回 SubagentResult
-    ├─ task_started
-    ├─ task_running
-    └─ task_completed / task_failed / task_timed_out
-```
+Reducer 的作用就是把“如何合并状态”显式写进状态模型里，避免多个工具或多个回合同时更新时互相覆盖。
 
 ---
 
-### 3.5 模型工厂
+## 7. 中间件链：Harness 的执行主干
 
-**文件**: `deerflow/models/factory.py`
+### 7.1 中间件链是动态拼装的
 
-#### create_chat_model() 核心函数
+当前实现并不是固定数量的中间件，而是按“共享 runtime 中间件 + lead agent 专属中间件”拼出来的动态链路。
 
-```python
-def create_chat_model(name: str | None = None, thinking_enabled: bool = False, **kwargs) -> BaseChatModel:
-    config = get_app_config()
-    model_config = config.get_model_config(name)
+#### 共享 runtime 中间件
 
-    # 反射加载模型类
-    model_class = resolve_class(model_config.use, BaseChatModel)
+`build_lead_runtime_middlewares()` 当前负责装配：
 
-    # 处理 thinking 配置
-    if thinking_enabled and model_config.when_thinking_enabled:
-        model_settings.update(model_config.when_thinking_enabled)
+1. `ThreadDataMiddleware`
+2. `UploadsMiddleware`
+3. `SandboxMiddleware`
+4. `DanglingToolCallMiddleware`
+5. `LLMErrorHandlingMiddleware`
+6. `GuardrailMiddleware`（配置启用时）
+7. `SandboxAuditMiddleware`
+8. `ToolErrorHandlingMiddleware`
 
-    # 处理 reasoning_effort
-    if not model_config.supports_reasoning_effort:
-        kwargs.pop("reasoning_effort", None)
+#### Lead agent 专属中间件
 
-    # 实例化模型
-    return model_class(**model_settings, **kwargs)
-```
+`_build_middlewares()` 会继续追加：
 
-#### 支持的特性
+- `SummarizationMiddleware`
+- `TodoMiddleware`
+- `TokenUsageMiddleware`
+- `TitleMiddleware`
+- `MemoryMiddleware`
+- `ViewImageMiddleware`
+- `DeferredToolFilterMiddleware`
+- `SubagentLimitMiddleware`
+- `LoopDetectionMiddleware`
+- `ClarificationMiddleware`
 
-| 特性 | 配置字段 | 说明 |
-|------|----------|------|
-| 扩展思考 | `supports_thinking` | 启用模型深度思考 |
-| 视觉输入 | `supports_vision` | 支持图像理解 |
-| 推理力度 | `supports_reasoning_effort` | low/medium/high |
-| Codex API | `use_responses_api` | OpenAI Responses API |
+其中：
 
-#### 配置示例
+- 是否启用某些中间件，取决于配置和模型能力
+- `ClarificationMiddleware` 被强制放在最后
 
-```yaml
-models:
-  - name: claude-sonnet-4
-    use: langchain_anthropic:ChatAnthropic
-    model: claude-sonnet-4-20250514
-    supports_thinking: true
-    supports_vision: true
-    when_thinking_enabled:
-      thinking:
-        type: enabled
-        budget_tokens: 10000
-```
+### 7.2 这条链体现了什么设计
 
----
+这条链路大致分成三段：
 
-### 3.6 工具系统
+#### 环境准备
 
-**文件**: `deerflow/tools/tools.py`
+- thread 目录
+- 上传文件信息
+- sandbox 获取
 
-#### get_available_tools() 组装逻辑
+#### 可靠性与安全性
 
-```python
-def get_available_tools(groups=None, include_mcp=True, model_name=None, subagent_enabled=False):
-    tools = []
+- dangling tool call 修复
+- LLM 错误处理
+- guardrail
+- sandbox 审计
+- tool 异常转消息
 
-    # 1. 配置定义的工具 (从 config.yaml)
-    tools.extend([resolve_variable(t.use, BaseTool) for t in config.tools])
+#### 业务增强与行为控制
 
-    # 2. 内置工具
-    tools.extend([present_file_tool, ask_clarification_tool])
+- 摘要
+- todo
+- token usage
+- title
+- memory
+- 图像处理
+- 工具延迟暴露
+- 子代理并发上限
+- 循环检测
+- 澄清优先
 
-    # 3. 子代理工具 (条件)
-    if subagent_enabled:
-        tools.append(task_tool)
+也就是说，Prompt 决定“模型倾向怎么想”，中间件决定“系统允许它怎么跑”。
 
-    # 4. 视觉工具 (条件)
-    if model_config.supports_vision:
-        tools.append(view_image_tool)
+### 7.3 `ToolErrorHandlingMiddleware` 的工程意义
 
-    # 5. MCP 工具 (从缓存)
-    if include_mcp:
-        tools.extend(get_cached_mcp_tools())
+它会把工具异常转成 `ToolMessage(status="error")`，而不是让整个 run 崩掉。
 
-    # 6. ACP 代理工具
-    if acp_agents:
-        tools.append(build_invoke_acp_agent_tool(acp_agents))
+这样做的好处是：
 
-    # 7. 工具搜索 (延迟加载)
-    if config.tool_search.enabled:
-        tools.append(tool_search_tool)
+- agent 还能根据错误继续推理
+- SSE 和 Gateway 层不必因为单个工具失败整体中断
 
-    return tools
-```
-
-#### 内置工具
-
-| 工具 | 功能 |
-|------|------|
-| `present_files` | 展示输出文件给用户 |
-| `ask_clarification` | 请求用户澄清 |
-| `view_image` | 读取图像为 base64 |
-| `task` | 委托给子代理 |
-| `tool_search` | 搜索延迟加载的工具 |
-
-#### 工具过滤
-
-```python
-# 安全检查：LocalSandboxProvider 时默认不暴露 host bash
-if not is_host_bash_allowed(config):
-    tool_configs = [t for t in tool_configs if not _is_host_bash_tool(t)]
-```
+这是 DeerFlow 很典型的“让系统尽量继续跑”的工程取向。
 
 ---
 
-### 3.7 MCP 集成
+## 8. 工具系统：多源合并而不是单一注册表
 
-**文件**: `deerflow/mcp/tools.py`
+位置：`deerflow/tools/tools.py`
 
-#### get_mcp_tools() 加载流程
+`get_available_tools()` 会把几个来源合并成最终工具集：
 
-```python
-async def get_mcp_tools() -> list[BaseTool]:
-    extensions_config = ExtensionsConfig.from_file()
-    servers_config = build_servers_config(extensions_config)
+1. `config.yaml` 中声明的普通工具
+2. harness 内置工具
+3. MCP 工具
+4. ACP agent 工具
+5. 运行时条件工具，比如 `task` 和 `view_image`
 
-    # 创建多服务器客户端
-    client = MultiServerMCPClient(servers_config, tool_interceptors=[...])
+### 8.1 普通工具通过配置和反射装载
 
-    # 获取所有工具
-    tools = await client.get_tools()
+`config.tools[].use` 会通过 `resolve_variable(...)` 变成真实 `BaseTool`。
 
-    # 为异步工具创建同步包装器
-    for tool in tools:
-        if tool.coroutine and not tool.func:
-            tool.func = _make_sync_tool_wrapper(tool.coroutine, tool.name)
+这让 DeerFlow 的工具层天然支持外部扩展，而不用修改核心装配逻辑。
 
-    return tools
-```
+### 8.2 Built-in 工具承担的是框架能力
 
-#### 同步包装器
+典型内置工具包括：
 
-```python
-def _make_sync_tool_wrapper(coro, tool_name):
-    def sync_wrapper(*args, **kwargs):
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
+- `present_files`
+- `ask_clarification`
+- `task`
+- `view_image`
 
-        if loop and loop.is_running():
-            # 使用全局线程池避免嵌套循环
-            future = _SYNC_TOOL_EXECUTOR.submit(asyncio.run, coro(*args, **kwargs))
-            return future.result()
-        else:
-            return asyncio.run(coro(*args, **kwargs))
+它们更多是在做运行时治理，而不是业务领域操作。
 
-    return sync_wrapper
-```
+例如：
 
-#### 支持的传输类型
+- `present_files` 把产物文件安全地暴露给前端
+- `ask_clarification` 让澄清变成显式可中断流程
+- `task` 用来委派子代理
 
-| 类型 | 配置字段 | 说明 |
-|------|----------|------|
-| `stdio` | `command`, `args` | 命令行启动 |
-| `sse` | `url`, `headers` | Server-Sent Events |
-| `http` | `url`, `headers` | HTTP 流 |
+### 8.3 MCP 是外部能力总线
 
-#### OAuth 支持
+位置：`deerflow/mcp/tools.py`
 
-- 自动 token 刷新
-- Authorization header 注入
-- 支持 `client_credentials` 和 `refresh_token` 流程
+MCP 集成会：
 
----
+1. 读取启用的 MCP server 配置
+2. 通过 `MultiServerMCPClient` 拉取工具
+3. 对 async-only 工具补一个同步 wrapper
+4. 可选地接入 OAuth 头和拦截器
 
-### 3.8 配置系统
+这让 MCP 工具最终也收敛成标准 `BaseTool`，后续执行链路无需区分它们的来源。
 
-#### AppConfig 主配置
+### 8.4 Deferred Tool Search 是规模治理能力
 
-**文件**: `deerflow/config/app_config.py`
+当 `tool_search` 启用时，MCP 工具不会全量直接暴露给模型，而是：
 
-```python
-class AppConfig(BaseModel):
-    log_level: str = "info"
-    token_usage: TokenUsageConfig
-    models: list[ModelConfig]
-    sandbox: SandboxConfig
-    tools: list[ToolConfig]
-    tool_groups: list[ToolGroupConfig]
-    skills: SkillsConfig
-    extensions: ExtensionsConfig
-    tool_search: ToolSearchConfig
-    checkpointer: CheckpointerConfig | None
-    stream_bridge: StreamBridgeConfig | None
-```
+- 先注册进 deferred registry
+- 对模型暴露 `tool_search`
+- 真正需要时再检索
 
-#### 配置加载优先级
+它解决的是：
 
-```
-1. 显式传入 config_path 参数
-2. DEER_FLOW_CONFIG_PATH 环境变量
-3. 当前目录 config.yaml
-4. 父目录 config.yaml (推荐位置)
-```
-
-#### 热重载机制
-
-```python
-def get_app_config() -> AppConfig:
-    resolved_path = AppConfig.resolve_config_path()
-    current_mtime = _get_config_mtime(resolved_path)
-
-    should_reload = (
-        _app_config is None or
-        _app_config_path != resolved_path or
-        _app_config_mtime != current_mtime
-    )
-
-    if should_reload:
-        return _load_and_cache_app_config(str(resolved_path))
-    return _app_config
-```
-
-#### 环境变量替换
-
-```python
-@classmethod
-def resolve_env_variables(cls, config: Any) -> Any:
-    if isinstance(config, str) and config.startswith("$"):
-        return os.getenv(config[1:])
-    # 递归处理 dict 和 list
-```
-
-#### ExtensionsConfig 扩展配置
-
-**文件**: `deerflow/config/extensions_config.py`
-
-```python
-class ExtensionsConfig(BaseModel):
-    mcp_servers: dict[str, McpServerConfig]
-    skills: dict[str, SkillStateConfig]
-```
+- 工具 schema 太多导致 prompt 膨胀
+- 模型面对超大工具集合时选择质量下降
 
 ---
 
-### 3.9 嵌入式客户端
+## 9. 文件系统与线程隔离
 
-**文件**: `deerflow/client.py`
+位置：`deerflow/config/paths.py`
 
-#### DeerFlowClient 类
+DeerFlow 的 thread 不只是逻辑概念，也对应真实目录结构：
 
-```python
-class DeerFlowClient:
-    def __init__(
-        self,
-        config_path: str | None = None,
-        checkpointer = None,
-        model_name: str | None = None,
-        thinking_enabled: bool = True,
-        subagent_enabled: bool = False,
-        plan_mode: bool = False,
-        agent_name: str | None = None,
-        middlewares: Sequence[AgentMiddleware] | None = None,
-    ):
-        # 延迟创建 Agent
-        self._agent = None
-        self._agent_config_key = None
+```text
+{base_dir}/threads/{thread_id}/
+  user-data/
+    workspace/
+    uploads/
+    outputs/
+  acp-workspace/
 ```
 
-#### 核心方法
+在沙箱里的虚拟路径对应为：
 
-| 方法 | 说明 |
-|------|------|
-| `stream(message, thread_id)` | 流式响应，返回 `StreamEvent` |
-| `chat(message, thread_id)` | 同步响应，返回最终文本 |
-| `reset_agent()` | 强制重建 Agent |
+- `/mnt/user-data/workspace`
+- `/mnt/user-data/uploads`
+- `/mnt/user-data/outputs`
+- `/mnt/acp-workspace`
 
-#### StreamEvent 事件类型
+### 9.1 `ThreadDataMiddleware`
 
-```python
-@dataclass
-class StreamEvent:
-    type: str    # "values" | "messages-tuple" | "end"
-    data: dict
-```
+位置：`deerflow/agents/middlewares/thread_data_middleware.py`
 
-- `"values"`: 完整状态快照
-- `"messages-tuple"`: 单条消息更新
-- `"end"`: 流结束
+它负责：
 
-#### Gateway 等价方法
+- 从 runtime/config 取出 `thread_id`
+- 计算当前线程的目录路径
+- 把路径写入 `state["thread_data"]`
 
-| 分类 | 方法 | 返回格式 |
-|------|------|----------|
-| Models | `list_models()`, `get_model(name)` | dict |
-| MCP | `get_mcp_config()`, `update_mcp_config(servers)` | dict |
-| Skills | `list_skills()`, `get_skill(name)`, `update_skill(name, enabled)` | dict |
-| Memory | `get_memory()`, `reload_memory()`, `get_memory_config()` | dict |
-| Uploads | `upload_files(thread_id, files)`, `list_uploads(thread_id)` | dict |
-| Artifacts | `get_artifact(thread_id, path)` | `tuple[bytes, str]` |
+默认 `lazy_init=True`，即：
 
----
+- 先算路径
+- 不立即创建所有目录
 
-## 四、设计模式应用
+### 9.2 `present_files` 如何保证结果可控
 
-| 模式 | 应用场景 | 代码位置 |
-|------|----------|----------|
-| **抽象工厂** | `SandboxProvider` 创建不同类型沙箱 | `sandbox/sandbox.py` |
-| **策略模式** | 不同 `Sandbox` 实现 | `sandbox/local/`, `community/aio_sandbox/` |
-| **责任链** | Middleware Chain 顺序执行 | `agents/lead_agent/agent.py:_build_middlewares()` |
-| **单例模式** | 配置/沙箱提供者缓存 | `config/app_config.py:get_app_config()` |
-| **观察者模式** | Memory 队列、MessageBus | `agents/memory/queue.py` |
-| **线程池** | Subagent 后台执行 | `subagents/executor.py` |
-| **反射** | 动态加载模型类/工具函数 | `reflection/resolvers.py` |
+位置：`deerflow/tools/builtins/present_file_tool.py`
+
+这个工具只允许呈现当前线程 `outputs/` 下的文件，并把路径统一规范成 `/mnt/user-data/outputs/...`。
+
+它不是直接操作前端，而是通过 `Command(update=...)` 更新状态里的 `artifacts`。
+
+这说明 DeerFlow 的“文件展示”也是状态驱动的，而不是 UI 直连文件系统。
 
 ---
 
-## 五、扩展点总览
+## 10. 沙箱系统
 
-| 扩展点 | 方式 | 配置位置 |
-|--------|------|----------|
-| 自定义模型 | `models[].use` 类路径 | `config.yaml` |
-| 自定义工具 | `tools[].use` 函数路径 | `config.yaml` |
-| 自定义沙箱 | 实现 `Sandbox` + `SandboxProvider` | `config.yaml: sandbox.use` |
-| 自定义中间件 | `custom_middlewares` 参数 | 运行时传入 |
-| 自定义子代理 | 注册到 `BUILTIN_SUBAGENTS` | `subagents/builtins/` |
-| MCP 服务器 | `mcpServers` 配置 | `extensions_config.json` |
-| Skills | 目录结构 | `skills/custom/` |
-| ACP 代理 | `acp_agents` 配置 | `config.yaml` |
+### 10.1 两层抽象
+
+沙箱层被拆成：
+
+- `Sandbox`：执行命令、读写文件、列目录的能力接口
+- `SandboxProvider`：sandbox 的获取、缓存、释放与销毁
+
+因此：
+
+- `Sandbox` 关心“能做什么”
+- `SandboxProvider` 关心“怎么管理生命周期”
+
+### 10.2 `SandboxMiddleware`
+
+位置：`deerflow/sandbox/middleware.py`
+
+它负责：
+
+1. 在需要时通过 `provider.acquire(thread_id)` 获取 `sandbox_id`
+2. 把 `sandbox_id` 写入状态
+3. 在 `after_agent()` 中调用 `provider.release(sandbox_id)`
+
+这里需要特别注意：
+
+- 中间件层面会调用 `release`
+- 但底层 provider 可以把 release 设计成 no-op、放回 warm pool，或者真正释放资源
+
+因此“同一线程是否复用沙箱”，最终由 provider 语义决定。
+
+### 10.3 `LocalSandboxProvider`
+
+位置：`deerflow/sandbox/local/local_sandbox_provider.py`
+
+特点：
+
+- 维护单例 `LocalSandbox`
+- `release()` 基本不做实际清理
+- 更像本地开发视角下的宿主机映射执行环境
+
+### 10.4 `AioSandboxProvider`
+
+位置：`deerflow/community/aio_sandbox/aio_sandbox_provider.py`
+
+这是更完整的沙箱生命周期管理器，支持：
+
+- `thread_id -> sandbox_id` 映射
+- deterministic sandbox id
+- warm pool
+- idle timeout
+- replicas 软上限
+- 本地容器 backend 或远程 provisioner backend
+- 自动挂载 thread 目录和 skills 目录
+
+它说明 DeerFlow 的沙箱能力已经不是“调用个 bash”那么简单，而是一套带资源池的执行环境管理系统。
 
 ---
 
-## 六、关键文件索引
+## 11. 子代理系统
 
-| 功能模块 | 核心文件 |
-|----------|----------|
-| Agent 入口 | `agents/lead_agent/agent.py` |
-| 状态定义 | `agents/thread_state.py` |
-| 系统提示 | `agents/lead_agent/prompt.py` |
-| 中间件 | `agents/middlewares/*.py` |
-| 记忆系统 | `agents/memory/updater.py`, `queue.py` |
-| 沙箱抽象 | `sandbox/sandbox.py` |
-| 沙箱工具 | `sandbox/tools.py` |
-| 子代理执行 | `subagents/executor.py` |
-| 子代理配置 | `subagents/config.py`, `registry.py` |
-| 模型工厂 | `models/factory.py` |
-| 工具组装 | `tools/tools.py` |
-| 内置工具 | `tools/builtins/*.py` |
-| MCP 工具 | `mcp/tools.py`, `mcp/client.py` |
-| 主配置 | `config/app_config.py` |
-| 扩展配置 | `config/extensions_config.py` |
-| 动态加载 | `reflection/resolvers.py` |
-| 嵌入式客户端 | `client.py` |
+### 11.1 入口是 `task` 工具
+
+位置：`deerflow/tools/builtins/task_tool.py`
+
+主 agent 并不是直接 new 一个子 agent，而是通过 `task(...)` 工具委派任务。
+
+`task_tool` 会：
+
+1. 读取 `subagent_type` 对应配置
+2. 从父 runtime 继承 thread_id、sandbox、thread_data、trace_id、父模型信息
+3. 重新构造一份工具集，但禁用递归 subagent
+4. 创建 `SubagentExecutor`
+5. 把任务放到后台执行
+6. 在后端轮询结果，并通过 stream writer 发状态事件
+
+### 11.2 `SubagentExecutor`
+
+位置：`deerflow/subagents/executor.py`
+
+它的关键实现点：
+
+- 子代理本身也是 `create_agent(...)` 组装出来的
+- 复用共享 runtime middlewares
+- 使用线程池调度和执行
+- 用 `_background_tasks` 跟踪状态
+- 收集 AI messages 以便实时回传
+
+### 11.3 为什么轮询在后端做
+
+这里有个非常重要的工程决策：
+
+- 子代理后台执行
+- 轮询由后端做
+- LLM 最后直接拿到完成后的结果
+
+好处是：
+
+- 避免模型自己反复查询状态浪费 token
+- 避免形成“任务状态轮询循环”
+
+这体现了 DeerFlow 的一条明显原则：把机械控制逻辑尽量从模型下沉到程序。
 
 ---
 
-## 七、阅读路径建议
+## 12. 记忆系统
 
-按以下顺序深入理解 Harness 工程:
+### 12.1 `MemoryMiddleware` 只负责排队
 
-1. **配置系统** (`config/app_config.py`) → 理解配置加载和热重载
-2. **Agent 入口** (`agents/lead_agent/agent.py`) → 理解 Agent 创建流程
-3. **中间件链** (`agents/middlewares/`) → 理解请求处理管道
-4. **Sandbox** (`sandbox/sandbox.py`, `middleware.py`) → 理解虚拟路径和生命周期
-5. **工具系统** (`tools/tools.py`) → 理解工具组装逻辑
-6. **子代理** (`subagents/executor.py`) → 理解后台执行机制
-7. **客户端** (`client.py`) → 理解嵌入式使用方式
+位置：`deerflow/agents/middlewares/memory_middleware.py`
+
+它在 `after_agent()` 中做的不是直接更新 memory，而是：
+
+1. 从消息历史中过滤出用户输入和最终 AI 回复
+2. 去掉 `<uploaded_files>` 这种会话性上下文
+3. 检测用户是否在纠正模型
+4. 把结果推到 memory queue
+
+### 12.2 `MemoryUpdater` 才负责真正持久化
+
+位置：`deerflow/agents/memory/updater.py`
+
+它负责：
+
+- 读取当前 memory
+- 调模型生成结构化更新
+- 清洗上传文件等临时信息
+- 保存到全局或 agent 级 memory
+
+因此 memory 是一条异步、去噪、可失败但不应拖垮主链路的后台能力。
+
+---
+
+## 13. 持久化：Checkpointer 与 Store 的分工
+
+### 13.1 Checkpointer
+
+位置：
+
+- `deerflow/agents/checkpointer/provider.py`
+- `deerflow/agents/checkpointer/async_provider.py`
+
+用途：
+
+- 持久化 LangGraph 图状态
+- 支持多轮线程恢复
+- 支持内存、SQLite、Postgres 三种后端
+
+### 13.2 Store
+
+位置：
+
+- `deerflow/runtime/store/provider.py`
+- `deerflow/runtime/store/async_provider.py`
+
+用途：
+
+- 存线程元数据
+- 支撑线程索引、搜索和标题同步等应用层需求
+
+### 13.3 为什么后端保持一致
+
+Store 与 checkpointer 使用同一套 `checkpointer` 配置，意味着：
+
+- 图状态和线程元数据尽量落在同类持久化后端
+- 部署复杂度更低
+
+可以简化记忆为：
+
+- checkpointer：图的状态
+- store：应用的线程记录
+
+---
+
+## 14. 流式运行时：RunManager + StreamBridge + Worker
+
+### 14.1 `RunManager`
+
+位置：`deerflow/runtime/runs/manager.py`
+
+它负责：
+
+- 创建 run 记录
+- 管理 pending/running/success/interrupted/error 状态
+- 执行同线程并发策略
+- 处理 cancel / interrupt / rollback 语义
+
+### 14.2 `StreamBridge`
+
+位置：`deerflow/runtime/stream_bridge/`
+
+它把：
+
+- graph 执行侧的事件生产
+- HTTP SSE 侧的事件消费
+
+解耦成一个桥。
+
+默认实现 `MemoryStreamBridge` 使用每个 run 一条 `asyncio.Queue`，并提供：
+
+- event id
+- heartbeat
+- end sentinel
+- 队列满时的丢弃保护
+
+### 14.3 `run_agent()`
+
+位置：`deerflow/runtime/runs/worker.py`
+
+它是真正驱动图执行的地方，关键动作是：
+
+1. 标记 run 为 running
+2. 构造 `Runtime(context={"thread_id": ...})`
+3. 调用 `agent_factory(config=...)`
+4. 给 agent 注入 checkpointer 和 store
+5. `agent.astream(...)`
+6. 把 LangGraph 输出序列化后 publish 到 `StreamBridge`
+7. 结束时写入最终状态并发送 `end`
+
+所以让 DeerFlow 支持 SSE 的核心，并不是 FastAPI，而是 Harness 内部这套事件桥接设计。
+
+---
+
+## 15. Gateway 如何接入 Harness
+
+位置：`backend/app/gateway/`
+
+### 15.1 生命周期初始化
+
+`app/gateway/deps.py` 的 `langgraph_runtime()` 会在 FastAPI lifespan 中初始化：
+
+- `stream_bridge`
+- `checkpointer`
+- `store`
+- `run_manager`
+
+并挂到 `app.state`。
+
+### 15.2 `start_run()` 的本质
+
+`app/gateway/services.py::start_run()` 做的事情可以概括成：
+
+1. 根据请求创建或拒绝 run
+2. 保证线程在 store 里存在
+3. 构造 `RunnableConfig`
+4. 合并 DeerFlow 自己的 `context` 字段到 `configurable`
+5. `asyncio.create_task(run_agent(...))`
+
+也就是说，Gateway 真正承担的是：
+
+- 协议解析
+- 线程/run 生命周期接入
+- SSE 输出
+
+Agent 本身仍然是 Harness 内核在运行。
+
+### 15.3 标题同步是跨存储层补偿逻辑
+
+`TitleMiddleware` 把标题写到 checkpoint 的状态里；而线程搜索接口读的是 store。
+
+所以 Gateway 需要在 run 结束后额外做一次标题同步，把 checkpoint 中的 `title` 回写到 store。
+
+这再次体现了 checkpointer 和 store 的职责分离。
+
+---
+
+## 16. `DeerFlowClient`：同一套内核的嵌入式入口
+
+位置：`deerflow/client.py`
+
+`DeerFlowClient` 不是另一套简化实现，而是直接复用 Harness 内核：
+
+- `create_chat_model(...)`
+- `_build_middlewares(...)`
+- `apply_prompt_template(...)`
+- `get_available_tools(...)`
+- `ThreadState`
+
+它解决的是“进程内直连调用”问题，而不是重新实现 agent 逻辑。
+
+因此：
+
+- Gateway 适合服务端 API
+- `DeerFlowClient` 适合脚本、测试、嵌入式集成
+
+两者的装配核心是同一套。
+
+---
+
+## 17. 关键设计原则
+
+结合实现，可以把 Harness 的核心设计原则总结为 6 点。
+
+### 17.1 配置驱动
+
+模型、工具、MCP、guardrail、sandbox 都尽量通过配置和反射装配，而不是硬编码。
+
+### 17.2 单一执行内核，多入口复用
+
+Gateway、Client、自定义 agent 都共享同一条核心装配链。
+
+### 17.3 Prompt 负责引导，Middleware 负责约束
+
+像澄清优先、子代理并发上限、错误恢复这类能力，都不是只靠 Prompt，而是 Prompt 与运行时双重协作。
+
+### 17.4 图状态与应用状态分离
+
+- checkpointer：图状态
+- store：应用线程元数据
+
+### 17.5 线程既是逻辑隔离单元，也是文件隔离单元
+
+`ThreadState`、thread 目录、sandbox 挂载共同围绕 `thread_id` 工作。
+
+### 17.6 把机械控制逻辑从模型下沉到程序
+
+比如：
+
+- 工具错误转 `ToolMessage`
+- 子代理轮询由后端完成
+- StreamBridge 解耦生产和消费
+
+这类策略都在减少模型承担的状态机复杂度。
+
+---
+
+## 18. 总结
+
+如果把整个实现压缩成一句判断：
+
+> DeerFlow Harness 的核心不是某一个 Agent，而是一套围绕 `ThreadState`、中间件链、工具聚合、沙箱隔离和流式运行时构建出来的 Agent 执行框架。
+
+理解这个项目时，最应该抓住四条主线：
+
+1. 配置如何变成真实对象
+2. Agent 如何被动态装配
+3. 一次 run 如何被持久化、流式化、可取消地执行
+4. 工具、沙箱、子代理如何围绕同一个 `thread_id` 协作
+
+这四条线串起来，Harness 的实现骨架就清楚了。
