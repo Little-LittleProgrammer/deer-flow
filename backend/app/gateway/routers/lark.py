@@ -81,17 +81,11 @@ async def _fetch_requirements_via_mcp(iteration_id: str | None = None) -> list[L
     view_id = feishu_cfg.view_id or os.environ.get("FEISHU_PROJECT_VIEW_ID", "")
 
     if not project_key:
-        logger.warning(
-            "feishu_project.project_key not configured (config.yaml) and "
-            "FEISHU_PROJECT_KEY env var not set; returning empty requirements list"
-        )
+        logger.warning("feishu_project.project_key not configured (config.yaml) and FEISHU_PROJECT_KEY env var not set; returning empty requirements list")
         return []
 
     if not view_id:
-        logger.warning(
-            "feishu_project.view_id not configured (config.yaml) and "
-            "FEISHU_PROJECT_VIEW_ID env var not set; returning empty requirements list"
-        )
+        logger.warning("feishu_project.view_id not configured (config.yaml) and FEISHU_PROJECT_VIEW_ID env var not set; returning empty requirements list")
         return []
 
     try:
@@ -278,12 +272,7 @@ def _parse_view_detail_response(raw: object) -> tuple[list[LarkRequirement], int
     "/requirements",
     response_model=LarkRequirementsResponse,
     summary="Get Feishu Project Requirements",
-    description=(
-        "Fetch requirement work items from Feishu Project via FeishuProjectMcp. "
-        "Uses get_view_detail to retrieve all items in the configured view "
-        "(feishu_project.view_id in config.yaml). "
-        "Requires FEISHU_MCP_TOKEN to be set."
-    ),
+    description=("Fetch requirement work items from Feishu Project via FeishuProjectMcp. Uses get_view_detail to retrieve all items in the configured view (feishu_project.view_id in config.yaml). Requires FEISHU_MCP_TOKEN to be set."),
 )
 async def get_requirements(iteration: str | None = None) -> LarkRequirementsResponse:
     """Pull requirements from Feishu Project MCP.

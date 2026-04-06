@@ -18,7 +18,7 @@ from deerflow.sandbox.file_operation_lock import get_file_operation_lock
 from deerflow.sandbox.sandbox import Sandbox
 from deerflow.sandbox.sandbox_provider import get_sandbox_provider
 from deerflow.sandbox.search import GrepMatch
-from deerflow.sandbox.security import LOCAL_HOST_BASH_DISABLED_MESSAGE, is_host_bash_allowed
+from deerflow.sandbox.security import LOCAL_HOST_BASH_DISABLED_MESSAGE, SANDBOX_GIT_BLOCKED_MESSAGE, is_git_write_command, is_host_bash_allowed
 
 _ABSOLUTE_PATH_PATTERN = re.compile(r"(?<![:\w])(?<!:/)/(?:[^\s\"'`;&|<>()]+)")
 _FILE_URL_PATTERN = re.compile(r"\bfile://\S+", re.IGNORECASE)
@@ -809,7 +809,8 @@ def sandbox_from_runtime(runtime: ToolRuntime[ContextT, ThreadState] | None = No
     if sandbox is None:
         raise SandboxNotFoundError(f"Sandbox with ID '{sandbox_id}' not found", sandbox_id=sandbox_id)
 
-    runtime.context["sandbox_id"] = sandbox_id  # Ensure sandbox_id is in context for downstream use
+    if runtime.context is not None:
+        runtime.context["sandbox_id"] = sandbox_id  # Ensure sandbox_id is in context for downstream use
     return sandbox
 
 
@@ -844,7 +845,8 @@ def ensure_sandbox_initialized(runtime: ToolRuntime[ContextT, ThreadState] | Non
         if sandbox_id is not None:
             sandbox = get_sandbox_provider().get(sandbox_id)
             if sandbox is not None:
-                runtime.context["sandbox_id"] = sandbox_id  # Ensure sandbox_id is in context for releasing in after_agent
+                if runtime.context is not None:
+                    runtime.context["sandbox_id"] = sandbox_id  # Ensure sandbox_id is in context for releasing in after_agent
                 return sandbox
             # Sandbox was released, fall through to acquire new one
 
@@ -866,7 +868,8 @@ def ensure_sandbox_initialized(runtime: ToolRuntime[ContextT, ThreadState] | Non
     if sandbox is None:
         raise SandboxNotFoundError("Sandbox not found after acquisition", sandbox_id=sandbox_id)
 
-    runtime.context["sandbox_id"] = sandbox_id  # Ensure sandbox_id is in context for releasing in after_agent
+    if runtime.context is not None:
+        runtime.context["sandbox_id"] = sandbox_id  # Ensure sandbox_id is in context for releasing in after_agent
     return sandbox
 
 

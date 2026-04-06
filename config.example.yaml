@@ -365,6 +365,13 @@ tool_search:
 
 # 选项 1：本地沙箱（默认）
 # 直接在主机上执行命令
+uploads:
+  # 上传 PDF 文件时使用的 PDF 转 Markdown 转换器。
+  # auto        — 优先使用 pymupdf4llm（如已安装）；对基于图片或加密的 PDF 回退到 MarkItDown（推荐默认值）。
+  # pymupdf4llm — 始终使用 pymupdf4llm（需安装：uv add pymupdf4llm）。更好的标题/表格提取；大多数文件更快。
+  # markitdown  — 始终使用 MarkItDown（原始行为，无额外依赖）。
+  pdf_converter: auto
+
 sandbox:
   use: deerflow.sandbox.local:LocalSandboxProvider
   # 默认禁用主机 bash 执行，因为 LocalSandboxProvider 不是安全的 shell 隔离边界
@@ -451,13 +458,17 @@ sandbox:
 # subagents:
 #   # 所有子代理的默认超时时间（秒）（默认：900 = 15 分钟）
 #   timeout_seconds: 900
+#   # Optional global max-turn override for all subagents
+#   # max_turns: 120
 #
 #   # 可选：每个代理的超时覆盖
 #   agents:
 #     general-purpose:
 #       timeout_seconds: 1800  # 复杂多步任务 30 分钟
+#       max_turns: 160
 #     bash:
 #       timeout_seconds: 300   # 快速命令执行 5 分钟
+#       max_turns: 80
 
 # ============================================================================
 # ACP 代理配置
@@ -729,6 +740,10 @@ checkpointer:
 #           context:
 #             thinking_enabled: true
 #             subagent_enabled: true
+#   wecom:
+#     enabled: false
+#     bot_id: $WECOM_BOT_ID
+#     bot_secret: $WECOM_BOT_SECRET
 
 # ============================================================================
 # Guardrails 配置
