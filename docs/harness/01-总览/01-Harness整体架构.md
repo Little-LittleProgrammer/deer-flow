@@ -4,6 +4,10 @@
 >
 > 代码范围：以 `backend/packages/harness/deerflow/` 为主，必要时补充 `backend/app/gateway/` 的接入层实现。
 
+补充专题：
+
+- `../02-安全与沙箱/01-Bash安全措施与执行链.md`：模型输出 `bash` 命令的安全措施与执行链
+
 ---
 
 ## 1. 定位
