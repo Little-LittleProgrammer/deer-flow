@@ -141,13 +141,44 @@ models:
   #   display_name: Kimi K2.5
   #   use: deerflow.models.patched_deepseek:PatchedChatDeepSeek
   #   model: kimi-k2.5
-  #   api_base: https://api.moonshot.cn/v1
-  #   api_key: $MOONSHOT_API_KEY
+  #   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  #   api_key: $BAILIAN_API_KEY
   #   timeout: 600.0
   #   max_retries: 2
   #   max_tokens: 32768
   #   supports_thinking: true
-  #   supports_vision: true  # 请检查您特定模型的能力
+  #   supports_vision: true  # 以所用具体模型能力为准
+  #   when_thinking_enabled:
+  #     extra_body:
+  #       thinking:
+  #         type: enabled
+
+  # - name: glm-5
+  #   display_name: GLM-5
+  #   use: langchain_openai:ChatOpenAI
+  #   model: glm-5
+  #   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  #   api_key: $BAILIAN_API_KEY
+  #   timeout: 600.0
+  #   max_retries: 2
+  #   max_tokens: 32768
+  #   supports_thinking: true
+  #   when_thinking_enabled:
+  #     extra_body:
+  #       thinking:
+  #         type: enabled
+
+  # - name: qwen3.6-plus
+  #   display_name: Qwen3.6-Plus
+  #   use: langchain_openai:ChatOpenAI
+  #   model: qwen3.6-plus
+  #   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  #   api_key: $BAILIAN_API_KEY
+  #   timeout: 600.0
+  #   supports_vision: true
+  #   max_retries: 2
+  #   max_tokens: 32768
+  #   supports_thinking: true
   #   when_thinking_enabled:
   #     extra_body:
   #       thinking:
@@ -304,21 +335,27 @@ tools:
   #   search_time_range: 10
 
   # Web search tool (uses Exa, requires EXA_API_KEY)
-  - name: web_search
-    group: web
-    use: deerflow.community.exa.tools:web_search_tool
-    max_results: 5
-    search_type: auto  # Options: auto, neural, keyword
-    contents_max_characters: 1000
-    # api_key: $EXA_API_KEY
+  # - name: web_search
+  #   group: web
+  #   use: deerflow.community.exa.tools:web_search_tool
+  #   max_results: 5
+  #   search_type: auto  # Options: auto, neural, keyword
+  #   contents_max_characters: 1000
+  #   # api_key: $EXA_API_KEY
 
   # Web fetch tool (uses Exa)
   # NOTE: Only one web_fetch provider can be active at a time.
   # Comment out the Jina AI web_fetch entry below before enabling this one.
-  - name: web_fetch
-    group: web
-    use: deerflow.community.exa.tools:web_fetch_tool
-    # api_key: $EXA_API_KEY
+  # - name: web_fetch
+  #   group: web
+  #   use: deerflow.community.exa.tools:web_fetch_tool
+  #   # api_key: $EXA_API_KEY
+
+  # # Web fetch tool (uses Jina AI reader)
+  # - name: web_fetch
+  #   group: web
+  #   use: deerflow.community.jina_ai.tools:web_fetch_tool
+  #   timeout: 10
 
   # 网页抓取工具（使用 InfoQuest）
   # - name: web_fetch
@@ -402,17 +439,6 @@ uploads:
   # auto        — 优先使用 pymupdf4llm（如已安装）；对基于图片或加密的 PDF 回退到 MarkItDown（推荐默认值）。
   # pymupdf4llm — 始终使用 pymupdf4llm（需安装：uv add pymupdf4llm）。更好的标题/表格提取；大多数文件更快。
   # markitdown  — 始终使用 MarkItDown（原始行为，无额外依赖）。
-  pdf_converter: auto
-
-# Option 1: Local Sandbox (Default)
-# Executes commands directly on the host machine
-uploads:
-  # PDF-to-Markdown converter used when a PDF is uploaded.
-  # auto        — prefer pymupdf4llm when installed; fall back to MarkItDown for
-  #               image-based or encrypted PDFs (recommended default).
-  # pymupdf4llm — always use pymupdf4llm (must be installed: uv add pymupdf4llm).
-  #               Better heading/table extraction; faster on most files.
-  # markitdown  — always use MarkItDown (original behaviour, no extra dependency).
   pdf_converter: auto
 
 sandbox:
