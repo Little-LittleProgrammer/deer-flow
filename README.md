@@ -53,6 +53,7 @@ DeerFlow has newly integrated the intelligent search and crawling toolset indepe
   - [Quick Start](#quick-start)
     - [Configuration](#configuration)
     - [Running the Application](#running-the-application)
+      - [Deployment Sizing](#deployment-sizing)
       - [Option 1: Docker (Recommended)](#option-1-docker-recommended)
       - [Option 2: Local Development](#option-2-local-development)
     - [Advanced](#advanced)
@@ -141,11 +142,25 @@ That prompt is intended for coding agents. It tells the agent to clone the repo 
        api_key: $OPENAI_API_KEY
        use_responses_api: true
        output_version: responses/v1
+
+     - name: qwen3-32b-vllm
+       display_name: Qwen3 32B (vLLM)
+       use: deerflow.models.vllm_provider:VllmChatModel
+       model: Qwen/Qwen3-32B
+       api_key: $VLLM_API_KEY
+       base_url: http://localhost:8000/v1
+       supports_thinking: true
+       when_thinking_enabled:
+         extra_body:
+           chat_template_kwargs:
+             enable_thinking: true
    ```
 
    OpenRouter and similar OpenAI-compatible gateways should be configured with `langchain_openai:ChatOpenAI` plus `base_url`. If you prefer a provider-specific environment variable name, point `api_key` at that variable explicitly (for example `api_key: $OPENROUTER_API_KEY`).
 
    To route OpenAI models through `/v1/responses`, keep using `langchain_openai:ChatOpenAI` and set `use_responses_api: true` with `output_version: responses/v1`.
+
+   For vLLM 0.19.0, use `deerflow.models.vllm_provider:VllmChatModel`. For Qwen-style reasoning models, DeerFlow toggles reasoning with `extra_body.chat_template_kwargs.enable_thinking` and preserves vLLM's non-standard `reasoning` field across multi-turn tool-call conversations. Legacy `thinking` configs are normalized automatically for backward compatibility. Reasoning models may also require the server to be started with `--reasoning-parser ...`. If your local vLLM deployment accepts any non-empty API key, you can still set `VLLM_API_KEY` to a placeholder value.
 
    CLI-backed provider examples:
 
@@ -210,6 +225,20 @@ That prompt is intended for coding agents. It tells the agent to clone the repo 
    ```
 
 ### Running the Application
+
+#### Deployment Sizing
+
+Use the table below as a practical starting point when choosing how to run DeerFlow:
+
+| Deployment target | Starting point | Recommended | Notes |
+|---------|-----------|------------|-------|
+| Local evaluation / `make dev` | 4 vCPU, 8 GB RAM, 20 GB free SSD | 8 vCPU, 16 GB RAM | Good for one developer or one light session with hosted model APIs. `2 vCPU / 4 GB` is usually not enough. |
+| Docker development / `make docker-start` | 4 vCPU, 8 GB RAM, 25 GB free SSD | 8 vCPU, 16 GB RAM | Image builds, bind mounts, and sandbox containers need more headroom than pure local dev. |
+| Long-running server / `make up` | 8 vCPU, 16 GB RAM, 40 GB free SSD | 16 vCPU, 32 GB RAM | Preferred for shared use, multi-agent runs, report generation, or heavier sandbox workloads. |
+
+- These numbers cover DeerFlow itself. If you also host a local LLM, size that service separately.
+- Linux plus Docker is the recommended deployment target for a persistent server. macOS and Windows are best treated as development or evaluation environments.
+- If CPU or memory usage stays pinned, reduce concurrent runs first, then move to the next sizing tier.
 
 #### Option 1: Docker (Recommended)
 

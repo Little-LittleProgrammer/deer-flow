@@ -69,6 +69,41 @@ COPY --from=builder /usr/lib/node_modules /usr/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/bin/npx
 
+# Install uv (source image overridable via UV_IMAGE build arg)
+COPY --from=uv-source /uv /uvx /usr/local/bin/
+
+# Set working directory
+WORKDIR /app
+
+# Copy backend source code
+COPY backend ./backend
+
+# Install dependencies with cache mount
+RUN --mount=type=cache,target=/root/.cache/uv \
+    sh -c "cd backend && UV_INDEX_URL=${UV_INDEX_URL:-https://pypi.org/simple} uv sync"
+
+# ── Stage 2: Dev ──────────────────────────────────────────────────────────────
+# Retains compiler toolchain from builder so startup-time `uv sync` can build
+# source distributions in development containers.
+FROM builder AS dev
+
+# Install Docker CLI (for DooD: allows starting sandbox containers via host Docker socket)
+COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
+
+EXPOSE 8001 2024
+
+CMD ["sh", "-c", "cd backend && PYTHONPATH=. uv run uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001"]
+
+# ── Stage 3: Runtime ──────────────────────────────────────────────────────────
+# Clean image without build-essential — reduces size (~200 MB) and attack surface.
+FROM python:3.12-slim-bookworm
+
+# Copy Node.js runtime from builder (provides npx for MCP servers)
+COPY --from=builder /usr/bin/node /usr/bin/node
+COPY --from=builder /usr/lib/node_modules /usr/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/bin/npx
+
 # Install Docker CLI (for DooD: allows starting sandbox containers via host Docker socket)
 COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
 
