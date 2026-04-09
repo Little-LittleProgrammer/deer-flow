@@ -6,73 +6,79 @@ from unittest.mock import patch
 from deerflow.sandbox.security import (
     get_feishu_sandbox_env,
     is_git_write_command,
+    is_high_risk_git_command,
 )
 
 # ---------------------------------------------------------------------------
-# is_git_write_command
+# is_high_risk_git_command / is_git_write_command (alias)
 # ---------------------------------------------------------------------------
 
 
-def test_blocks_git_commit() -> None:
-    assert is_git_write_command("git commit -m 'test'") is True
-
-
 def test_blocks_git_push() -> None:
-    assert is_git_write_command("git push origin main") is True
-
-
-def test_blocks_git_reset() -> None:
-    assert is_git_write_command("git reset --hard HEAD~1") is True
-
-
-def test_blocks_git_rebase() -> None:
-    assert is_git_write_command("git rebase main") is True
-
-
-def test_blocks_git_merge() -> None:
-    assert is_git_write_command("git merge feature/foo") is True
+    assert is_high_risk_git_command("git push origin main") is True
 
 
 def test_blocks_git_clean() -> None:
-    assert is_git_write_command("git clean -fd") is True
+    assert is_high_risk_git_command("git clean -fd") is True
+
+
+def test_allows_git_commit_reset_rebase_merge() -> None:
+    assert is_high_risk_git_command("git commit -m 'test'") is False
+    assert is_high_risk_git_command("git reset --hard HEAD~1") is False
+    assert is_high_risk_git_command("git rebase main") is False
+    assert is_high_risk_git_command("git merge feature/foo") is False
+
+
+def test_allows_git_fetch_pull_remote_rm() -> None:
+    assert is_high_risk_git_command("git fetch origin") is False
+    assert is_high_risk_git_command("git pull origin main") is False
+    assert is_high_risk_git_command("git remote -v") is False
+    assert is_high_risk_git_command("git rm foo.txt") is False
 
 
 def test_allows_git_log() -> None:
-    assert is_git_write_command("git log --oneline") is False
+    assert is_high_risk_git_command("git log --oneline") is False
 
 
 def test_allows_git_status() -> None:
-    assert is_git_write_command("git status") is False
+    assert is_high_risk_git_command("git status") is False
 
 
 def test_allows_git_diff() -> None:
-    assert is_git_write_command("git diff HEAD") is False
+    assert is_high_risk_git_command("git diff HEAD") is False
 
 
 def test_allows_git_show() -> None:
-    assert is_git_write_command("git show HEAD:file.py") is False
+    assert is_high_risk_git_command("git show HEAD:file.py") is False
 
 
 def test_allows_git_ls_files() -> None:
-    assert is_git_write_command("git ls-files") is False
+    assert is_high_risk_git_command("git ls-files") is False
 
 
 def test_allows_non_git_command() -> None:
-    assert is_git_write_command("python tests/test_foo.py") is False
-    assert is_git_write_command("ls -la /mnt/user-data/workspace") is False
+    assert is_high_risk_git_command("python tests/test_foo.py") is False
+    assert is_high_risk_git_command("ls -la /mnt/user-data/workspace") is False
 
 
-def test_blocks_git_commit_in_chain() -> None:
-    assert is_git_write_command("cd /workspace && git commit -m 'done'") is True
+def test_allows_git_commit_in_chain() -> None:
+    assert is_high_risk_git_command("cd /workspace && git commit -m 'done'") is False
 
 
 def test_blocks_git_push_in_chain() -> None:
-    assert is_git_write_command("git add . && git push origin feature/foo") is True
+    assert is_high_risk_git_command("git add . && git push origin feature/foo") is True
+
+
+def test_blocks_git_clean_in_chain() -> None:
+    assert is_high_risk_git_command("git status && git clean -fd") is True
 
 
 def test_does_not_block_word_commit_in_echo() -> None:
-    # The word "commit" in a non-git context should not be blocked
-    assert is_git_write_command("echo 'commit message'") is False
+    assert is_high_risk_git_command("echo 'commit message'") is False
+
+
+def test_is_git_write_command_is_alias() -> None:
+    assert is_git_write_command is is_high_risk_git_command
 
 
 # ---------------------------------------------------------------------------

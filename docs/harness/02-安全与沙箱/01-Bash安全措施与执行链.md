@@ -255,53 +255,21 @@ middleware 会记录：
 
 ---
 
-## 7. 额外策略：Git 写操作阻断
+## 7. 额外策略：Git 高危命令阻断
 
-代码设计上，Harness 还打算统一禁止 agent 通过 `bash` 直接执行 git 写操作。
+`bash_tool()` 在真正执行前会调用 `is_high_risk_git_command()`（历史别名为 `is_git_write_command`），仅拦截**高危** git 子命令。
 
 相关代码：
 
 - `backend/packages/harness/deerflow/sandbox/security.py`
+- `backend/packages/harness/deerflow/sandbox/tools.py`（`if is_high_risk_git_command(command): ...`）
 
-被列入 block 的子命令包括：
+当前被列入 block 的子命令为：
 
-- `commit`
-- `push`
-- `reset`
-- `rebase`
-- `merge`
-- `cherry-pick`
-- `revert`
-- `tag`
-- `remote`
-- `fetch`
-- `pull`
-- `stash`
-- `clean`
-- `rm`
+- `push`（写入远程，可能影响共享仓库）
+- `clean`（可大量删除未跟踪文件）
 
-对应的设计意图是：
-
-- git 写操作由 framework 托管
-- agent 只能做只读 git，如 `status`、`log`、`diff`、`show`、`ls-files`
-
-### 7.1 当前分支存在接线缺陷
-
-虽然 `bash_tool()` 中已经写了：
-
-- `if is_git_write_command(command): ...`
-
-但当前文件没有导入：
-
-- `is_git_write_command`
-- `SANDBOX_GIT_BLOCKED_MESSAGE`
-
-因此在当前分支，`bash_tool()` 一进入这段逻辑就会触发 `NameError`，而不是按预期返回“git 写操作被拒绝”的错误消息。
-
-这意味着：
-
-- 设计上有 git 写拦截
-- 当前代码状态下，这条拦截链路有实现缺陷
+其余 git CLI（如 `commit`、`fetch`、`pull`、`merge`、`rebase`、`remote`、`clone` 等）不在拦截列表中，由使用方自行权衡风险。
 
 ---
 

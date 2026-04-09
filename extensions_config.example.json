@@ -1,5 +1,18 @@
 {
   "mcpServers": {
+    "FeishuProjectMcp": {
+      "enabled": true,
+      "type": "http",
+      "command": null,
+      "args": [],
+      "env": {},
+      "url": "https://project.feishu.cn/mcp_server/v1",
+      "headers": {
+        "X-Mcp-Token": "$FEISHU_MCP_TOKEN"
+      },
+      "oauth": null,
+      "description": "Feishu Project MCP server for accessing requirements and nodes. Set FEISHU_MCP_TOKEN env var."
+    },
     "filesystem": {
       "enabled": false,
       "type": "stdio",

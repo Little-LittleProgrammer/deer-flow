@@ -531,7 +531,6 @@ export function useThreads(
     select: ["thread_id", "updated_at", "values", "context"],
   },
 ) {
-  const apiClient = getAPIClient();
   return useQuery<AgentThread[]>({
     queryKey: ["threads", "search", params],
     queryFn: async () => {
@@ -542,9 +541,20 @@ export function useThreads(
       // Preserve prior semantics: if a non-positive limit is explicitly provided,
       // delegate to a single search call with the original parameters.
       if (maxResults !== undefined && maxResults <= 0) {
-        const response =
-          await apiClient.threads.search<AgentThreadState>(params);
-        return response as AgentThread[];
+        const response = await fetch(`${getBackendBaseURL()}/api/threads/search`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            limit: params.limit,
+            offset: params.offset,
+          }),
+        });
+        if (!response.ok) {
+          throw new Error("Failed to load threads.");
+        }
+        return (await response.json()) as AgentThread[];
       }
 
       const pageSize =
@@ -569,10 +579,23 @@ export function useThreads(
           break;
         }
 
-        const response = (await apiClient.threads.search<AgentThreadState>({
-          ...params,
-          limit: currentLimit,
-          offset,
+        const response = (await fetch(
+          `${getBackendBaseURL()}/api/threads/search`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              limit: currentLimit,
+              offset,
+            }),
+          },
+        ).then(async (res) => {
+          if (!res.ok) {
+            throw new Error("Failed to load threads.");
+          }
+          return res.json();
         })) as AgentThread[];
 
         threads.push(...response);
@@ -592,11 +615,8 @@ export function useThreads(
 
 export function useDeleteThread() {
   const queryClient = useQueryClient();
-  const apiClient = getAPIClient();
   return useMutation({
     mutationFn: async ({ threadId }: { threadId: string }) => {
-      await apiClient.threads.delete(threadId);
-
       const response = await fetch(
         `${getBackendBaseURL()}/api/threads/${encodeURIComponent(threadId)}`,
         {

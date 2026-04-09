@@ -47,54 +47,43 @@ def is_host_bash_allowed(config=None) -> bool:
     return bool(getattr(sandbox_cfg, "allow_host_bash", False))
 
 
-# Commands that the Agent must never execute directly in the sandbox.
-# Framework-Delegated Git pattern: git commit/push/reset etc. are reserved
-# for backend Python nodes, not for LLM-driven agent tool calls.
-_BLOCKED_GIT_SUBCOMMANDS = frozenset(
-    [
-        "commit",
-        "push",
-        "reset",
-        "rebase",
-        "merge",
-        "cherry-pick",
-        "revert",
-        "tag",
-        "remote",
-        "fetch",
-        "pull",
-        "stash",
-        "clean",
-        "rm",
-    ]
-)
+# Only block clearly high-risk git usage in the sandbox:
+# - push: writes to remotes (exfil / overwrite shared history)
+# - clean: can delete large numbers of untracked files (-fd, etc.)
+_BLOCKED_HIGH_RISK_GIT_SUBCOMMANDS = frozenset(["push", "clean"])
 
 _GIT_CMD_PATTERN = re.compile(r"(?:^|[;&|]\s*)git\s+(\S+)", re.MULTILINE)
 
-SANDBOX_GIT_BLOCKED_MESSAGE = (
-    "Git write operations (commit, push, reset, rebase, etc.) are not permitted inside the sandbox. "
-    "These operations are managed by the framework (Framework-Delegated Git pattern) to ensure "
-    "safety and auditability. Use read-only git commands (log, status, diff, show, ls-files) instead."
+SANDBOX_GIT_HIGH_RISK_MESSAGE = (
+    "High-risk git commands (push, clean) are not permitted inside the sandbox. "
+    "Push can modify remote repositories; clean can delete many files. "
+    "Use other git commands as needed, or perform push/clean outside the agent sandbox."
 )
 
+# Backwards-compatible alias (historical name).
+SANDBOX_GIT_BLOCKED_MESSAGE = SANDBOX_GIT_HIGH_RISK_MESSAGE
 
-def is_git_write_command(command: str) -> bool:
-    """Return True if the command contains a blocked git write subcommand.
 
-    Allows read-only git operations (log, status, diff, show, ls-files, blame, etc.)
-    while blocking all write operations.
+def is_high_risk_git_command(command: str) -> bool:
+    """Return True if the command contains a blocked high-risk git subcommand.
+
+    Currently blocks only ``git push`` and ``git clean``. Other git CLI usage is allowed.
 
     Args:
         command: The bash command string to inspect.
 
     Returns:
-        True if the command contains a blocked git subcommand, False otherwise.
+        True if a blocked high-risk git subcommand is present, False otherwise.
     """
     for match in _GIT_CMD_PATTERN.finditer(command):
         subcommand = match.group(1).lstrip("-")
-        if subcommand in _BLOCKED_GIT_SUBCOMMANDS:
+        if subcommand in _BLOCKED_HIGH_RISK_GIT_SUBCOMMANDS:
             return True
     return False
+
+
+# Backwards-compatible alias (historical name).
+is_git_write_command = is_high_risk_git_command
 
 
 def get_feishu_sandbox_env() -> dict[str, str]:

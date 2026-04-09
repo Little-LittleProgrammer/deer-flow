@@ -21,6 +21,7 @@ description: Review the rationality, completeness, boundary conditions, and acce
 - 必须查代码：技术判断必须基于真实代码，而不是凭经验猜测。
 - 先找问题，再给建议：输出以发现的问题和缺漏为主，建议为辅。
 - 缺信息时要显式说明：无法确认的部分列为假设、待确认问题或信息缺口。
+- **重要**：本技能只是用来评价 prd 产品需求文档写的是否合理，是否存在问题，是否需要补充，是否需要修改，并不是用来评审代码的
 
 ## 工作流
 
@@ -38,11 +39,8 @@ description: Review the rationality, completeness, boundary conditions, and acce
 
 - 优先读取 `rd-workflow-base` 提供的需求文档内容。
 - 如果还需要更完整内容、关联文档或交叉验证，使用 `lark-doc` 继续读取飞书文档。
-- 除主 PRD 外，按需补充读取：
-  - 交互稿或设计说明
-  - 技术方案文档
-  - 历史需求或变更记录
-  - 关联规则说明、接口文档、埋点说明
+- 除主 PRD 外，使用 `lark-doc` skill 的 `docs +search` 命令按需搜索其他文件相关文件：
+  - 例如: prd 是关于签约功能的，可以使用 `docs +search` 命令搜索签约相关的文件，如签约流程、签约协议、签约合同等。
 
 ### Step 3: 阅读相关代码
 
@@ -97,7 +95,7 @@ description: Review the rationality, completeness, boundary conditions, and acce
 ## 主要发现
 ### 🔴 Critical
 - [问题] 描述冲突、缺失或高风险点
-- [依据] 需求文档 / 代码现状 / 关联文档
+- [依据] 需求文档 / 代码现状(代码现状只需要描述逻辑，不需要列源码) / 关联文档
 - [影响] 为什么必须在开发前明确
 - [建议] 推荐补充方式
 
@@ -129,6 +127,8 @@ description: Review the rationality, completeness, boundary conditions, and acce
 ### Step 6: 添加文档评论
 
 对 prd 需求文档进行评论，调用 `lark-drive` skill 的 `+add-comment` 命令 添加评论
+如果遇到需要用户认证的情况，返回认证链接让用户打开
+如果最后无法添加评论，则调用 `FeishuProjectMcp` 工具 评论到飞书项目中(project_key 读取环境变量 `FEISHU_PROJECT_KEY`)
 
 ## 评审清单
 

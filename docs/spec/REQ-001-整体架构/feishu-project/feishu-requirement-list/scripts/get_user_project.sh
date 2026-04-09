@@ -41,7 +41,7 @@ done
 # 参数说明（位置参数）
 TENANT_ACCESS_TOKEN="${1:-}"
 FEISHU_PROJECT_USER_KEY="${2:-}"
-PROJECT_KEY="${3:-}"
+FEISHU_PROJECT_KEY="${3:-}"
 VIEW_ID="${4:-}"
 PAGE_NUM="${5:-1}"
 PAGE_SIZE="${6:-50}"
@@ -57,7 +57,7 @@ if [[ -z "${FEISHU_PROJECT_USER_KEY}" ]]; then
   exit 1
 fi
 
-if [[ -z "${PROJECT_KEY}" ]]; then
+if [[ -z "${FEISHU_PROJECT_KEY}" ]]; then
   echo '{"error": "缺少必需参数 project_key"}' >&2
   exit 1
 fi
@@ -81,7 +81,7 @@ fi
 # ============================================================
 # 调用 API 获取工作项列表
 # ============================================================
-RESPONSE=$(curl -s -X POST "https://project.feishu.cn/open_api/${PROJECT_KEY}/view/${VIEW_ID}" \
+RESPONSE=$(curl -s -X POST "https://project.feishu.cn/open_api/${FEISHU_PROJECT_KEY}/view/${VIEW_ID}" \
   -H 'Content-Type: application/json' \
   -H "X-PLUGIN-TOKEN: ${TENANT_ACCESS_TOKEN}" \
   -H "X-USER-KEY: ${FEISHU_PROJECT_USER_KEY}" \

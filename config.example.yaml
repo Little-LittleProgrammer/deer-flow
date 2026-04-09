@@ -137,52 +137,68 @@ models:
   #         type: enabled
 
   # 示例：Kimi K2.5 模型
-  - name: kimi-k2.5
-    display_name: Kimi K2.5
-    use: deerflow.models.patched_deepseek:PatchedChatDeepSeek
-    model: kimi-k2.5
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    api_key: $BAILIAN_API_KEY
-    timeout: 600.0
-    max_retries: 2
-    max_tokens: 32768
-    supports_thinking: true
-    supports_vision: true  # 以所用具体模型能力为准
-    when_thinking_enabled:
-      extra_body:
-        thinking:
-          type: enabled
+  # - name: kimi-k2.5
+  #   display_name: Kimi K2.5
+  #   use: deerflow.models.patched_deepseek:PatchedChatDeepSeek
+  #   model: kimi-k2.5
+  #   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  #   api_key: $BAILIAN_API_KEY
+  #   timeout: 600.0
+  #   max_retries: 2
+  #   max_tokens: 32768
+  #   supports_thinking: true
+  #   supports_vision: true  # 以所用具体模型能力为准
+  #   when_thinking_enabled:
+  #     extra_body:
+  #       thinking:
+  #         type: enabled
 
-  - name: glm-5
-    display_name: GLM-5
-    use: langchain_openai:ChatOpenAI
-    model: glm-5
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    api_key: $BAILIAN_API_KEY
-    timeout: 600.0
-    max_retries: 2
-    max_tokens: 32768
-    supports_thinking: true
-    when_thinking_enabled:
-      extra_body:
-        thinking:
-          type: enabled
+  # - name: glm-5
+  #   display_name: GLM-5
+  #   use: langchain_openai:ChatOpenAI
+  #   model: glm-5
+  #   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  #   api_key: $BAILIAN_API_KEY
+  #   timeout: 600.0
+  #   max_retries: 2
+  #   max_tokens: 32768
+  #   supports_thinking: true
+  #   when_thinking_enabled:
+  #     extra_body:
+  #       thinking:
+  #         type: enabled
 
-  - name: qwen3.6-plus
-    display_name: Qwen3.6-Plus
-    use: langchain_openai:ChatOpenAI
-    model: qwen3.6-plus
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    api_key: $BAILIAN_API_KEY
-    timeout: 600.0
-    supports_vision: true
-    max_retries: 2
-    max_tokens: 32768
-    supports_thinking: true
-    when_thinking_enabled:
-      extra_body:
-        thinking:
-          type: enabled
+  # - name: qwen3.6-plus
+  #   display_name: Qwen3.6-Plus
+  #   use: langchain_openai:ChatOpenAI
+  #   model: qwen3.6-plus
+  #   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  #   api_key: $BAILIAN_API_KEY
+  #   timeout: 600.0
+  #   supports_vision: true
+  #   max_retries: 2
+  #   max_tokens: 32768
+  #   supports_thinking: true
+  #   when_thinking_enabled:
+  #     extra_body:
+  #       thinking:
+  #         type: enabled
+
+  # - name: gpt-5.4
+  #   display_name: GPT-5.4
+  #   use: langchain_openai:ChatOpenAI
+  #   model: gpt-5.4
+  #   base_url: https://apitokenzz.xyz/v1
+  #   api_key: $CUSTOM_OPENAI_API_KEY
+  #   timeout: 600.0
+  #   supports_vision: true
+  #   max_retries: 2
+  #   max_tokens: 32768
+  #   supports_thinking: true
+  #   when_thinking_enabled:
+  #     extra_body:
+  #       thinking:
+  #         type: enabled
 
   # 示例：Novita AI（OpenAI 兼容）
   # Novita 提供 OpenAI 兼容 API，定价较有竞争力

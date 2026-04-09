@@ -76,7 +76,17 @@ setup-sandbox:
 	@echo "  Pre-pulling Sandbox Container Image"
 	@echo "=========================================="
 	@echo ""
-	@IMAGE=$$(grep -A 20 "# sandbox:" config.yaml 2>/dev/null | grep "image:" | awk '{print $$2}' | head -1); \
+	@IMAGE=$$( \
+		for prefix in '^sandbox:' '^# sandbox:'; do \
+			line=$$(grep -E -A 120 "$$prefix" config.yaml 2>/dev/null | grep 'image:' | head -1) || true; \
+			[ -z "$$line" ] && continue; \
+			val=$$(printf '%s\n' "$$line" | sed -E 's/.*image:[[:space:]]+//' | sed -E 's/[[:space:]]+#.*$$//'); \
+			[ -z "$$val" ] && continue; \
+			[ "$$val" = "#" ] && continue; \
+			printf '%s\n' "$$val"; \
+			break; \
+		done \
+	); \
 	if [ -z "$$IMAGE" ]; then \
 		IMAGE="enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest"; \
 		echo "Using default image: $$IMAGE"; \

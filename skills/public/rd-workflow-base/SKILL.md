@@ -5,6 +5,7 @@ allowed-tools: bash, read_file, write_file, str_replace, ask_clarification
 ---
 
 # R&D Workflow Base - 初始化阶段
+> **重要**：本技能大多是配合自动化工作流使用，对于需要用户协作部分，模型可以按照推荐流程执行
 
 ## 概述
 
@@ -36,24 +37,37 @@ echo "CODEUP_TOKEN=$(printenv CODEUP_TOKEN | head -c 8)..."
 
 ### Step 2: 克隆仓库
 
-对每个仓库执行克隆并创建分支：
+1. 对每个仓库执行克隆并创建分支：
+
+- 如果 `codeup` 目录不存在，则创建
+```bash
+mkdir -p codeup
+```
 
 克隆命令格式, 严格按照下面的格式：
 ```bash
-git clone https://oauth2:${CODEUP_TOKEN}@codeup.aliyun.com/${CODEUP_ORG}/${REPO_PATH}.git
+if [ -d "codeup/${REPO_PATH}" ]; then
+    echo "仓库已存在，跳过克隆"
+else
+    git clone https://oauth2:${CODEUP_TOKEN}@codeup.aliyun.com/${CODEUP_ORG}/${REPO_PATH}.git
+fi
 ```
 
-克隆完成后切换到 `feature/${requirement_id}` 分支。
+工作区路径：`codeup/<repo_name>`
 
-工作区路径：`/mnt/user-data/workspace/<repo_name>`
+克隆完成后，新建需求相关文件夹，将代码仓库软连接到需求相关文件夹，文件夹路径：`requirements/<requirement_name>/`
+```bash
+mkdir -p requirements/${requirement_name}
+ln -s codeup/${REPO_PATH} requirements/${requirement_name}/${REPO_PATH}
+```
 
 若克隆失败，记录错误并继续处理其他仓库；所有仓库均失败时停止流程。
 
 ### Step 3: 获取需求文档
 
-1. 使用 `FeishuProjectMcp` 工具的 `get_workitem_brief` 获取需求详情，进而获取需求文档链接
+1. 使用 `FeishuProjectMcp` 工具的 `get_workitem_brief` 获取需求详情，进而获取需求文档链接(project_key 读取环境变量 `FEISHU_PROJECT_KEY`)
 2. 使用 `lark-doc` skill 读取文档内容, 如果需要认证，返回认证链接让用户打开
-3. 保存到本地：`/mnt/user-data/workspace/docs/${requirement_id}.md`
+3. 保存到本地：`docs/${requirement_name}.md`
 
 
 ## 配置要求

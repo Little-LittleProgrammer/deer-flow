@@ -164,14 +164,6 @@ Skip simple one-off tasks.
 """
 
 
-def _get_enabled_skills():
-    try:
-        return list(load_skills(enabled_only=True))
-    except Exception:
-        logger.exception("Failed to load enabled skills for prompt injection")
-        return []
-
-
 def _build_subagent_section(max_concurrent: int) -> str:
     """Build the subagent system prompt section with dynamic concurrency limit.
 

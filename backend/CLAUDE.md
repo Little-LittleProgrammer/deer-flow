@@ -158,7 +158,7 @@ from deerflow.config import get_app_config
   3. `human_approval_node` — Calls `langgraph.types.interrupt()` to pause execution and surface technical design for human review. Resume with `Command(resume="approved")` or `Command(resume="rejected")`
   4. `development_node` — Executes coding tasks in sandbox; framework performs `git add && git commit` after each task (Git write ops are blocked inside the sandbox)
   5. `delivery_node` — Framework performs `git push`, calls `CodeupClient.create_change_request()` to open an MR
-- Git write operations (`commit`, `push`, `rebase`, etc.) are blocked inside the sandbox via `is_git_write_command()` in `sandbox/security.py`; only the framework nodes can modify the Git history
+- High-risk git commands (`push`, `clean`) are blocked inside the sandbox via `is_high_risk_git_command()` in `sandbox/security.py`; other git CLI usage is allowed in the sandbox bash tool
 
 **Runtime Configuration** (via `config.configurable`):
 - `thinking_enabled` - Enable model's extended thinking

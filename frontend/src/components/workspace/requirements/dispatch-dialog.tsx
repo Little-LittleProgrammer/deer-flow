@@ -32,6 +32,8 @@ import {
   type LarkRequirement,
   type WorkMode,
 } from "@/core/requirements";
+import { useLocalSettings } from "@/core/settings";
+import { updateThreadSettings } from "@/core/settings/store";
 
 interface DispatchDialogProps {
   requirement: LarkRequirement | null;
@@ -71,6 +73,7 @@ export function DispatchDialog({
   onOpenChange,
 }: DispatchDialogProps) {
   const router = useRouter();
+  const [settings] = useLocalSettings();
   const [workMode, setWorkMode] = useState<WorkMode>("requirement-review");
   const [repositories, setRepositories] = useState<CodeupRepository[]>([]);
   const [selectedRepoIds, setSelectedRepoIds] = useState<Set<number>>(
@@ -151,6 +154,32 @@ export function DispatchDialog({
         repoUrls: selectedRepos,
       });
 
+      const currentContext = settings.context;
+      const runContext = {
+        model_name: currentContext.model_name,
+        mode: currentContext.mode,
+        thinking_enabled: currentContext.mode !== "flash",
+        is_plan_mode:
+          currentContext.mode === "pro" || currentContext.mode === "ultra",
+        subagent_enabled: currentContext.mode === "ultra",
+        reasoning_effort:
+          currentContext.reasoning_effort ??
+          (currentContext.mode === "ultra"
+            ? "high"
+            : currentContext.mode === "pro"
+              ? "medium"
+              : currentContext.mode === "thinking"
+                ? "low"
+                : undefined),
+        thread_id: thread.thread_id,
+      };
+
+      updateThreadSettings(thread.thread_id, "context", {
+        model_name: runContext.model_name,
+        mode: runContext.mode,
+        reasoning_effort: runContext.reasoning_effort,
+      });
+
       const run = await client.runs.create(thread.thread_id, "lead_agent", {
         input: {
           messages: [{ role: "human", content: initialMessage }],
@@ -159,10 +188,8 @@ export function DispatchDialog({
         streamSubgraphs: true,
         config: {
           recursion_limit: 1000,
-          configurable: {
-            thread_id: thread.thread_id,
-          },
         },
+        context: runContext,
       });
 
       // useStream(reconnectOnMount: true) reconnects via sessionStorage key "lg:stream:{threadId}".
@@ -182,6 +209,7 @@ export function DispatchDialog({
     requirement,
     repositories,
     selectedRepoIds,
+    settings.context,
     workMode,
     onOpenChange,
     router,

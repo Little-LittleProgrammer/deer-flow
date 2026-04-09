@@ -18,7 +18,12 @@ from deerflow.sandbox.file_operation_lock import get_file_operation_lock
 from deerflow.sandbox.sandbox import Sandbox
 from deerflow.sandbox.sandbox_provider import get_sandbox_provider
 from deerflow.sandbox.search import GrepMatch
-from deerflow.sandbox.security import LOCAL_HOST_BASH_DISABLED_MESSAGE, SANDBOX_GIT_BLOCKED_MESSAGE, is_git_write_command, is_host_bash_allowed
+from deerflow.sandbox.security import (
+    LOCAL_HOST_BASH_DISABLED_MESSAGE,
+    SANDBOX_GIT_HIGH_RISK_MESSAGE,
+    is_high_risk_git_command,
+    is_host_bash_allowed,
+)
 
 _ABSOLUTE_PATH_PATTERN = re.compile(r"(?<![:\w])(?<!:/)/(?:[^\s\"'`;&|<>()]+)")
 _FILE_URL_PATTERN = re.compile(r"\bfile://\S+", re.IGNORECASE)
@@ -1000,9 +1005,9 @@ def bash_tool(runtime: ToolRuntime[ContextT, ThreadState], description: str, com
         command: The bash command to execute. Always use absolute paths for files and directories.
     """
     try:
-        # Block git write operations regardless of sandbox mode (Framework-Delegated Git)
-        if is_git_write_command(command):
-            return f"Error: {SANDBOX_GIT_BLOCKED_MESSAGE}"
+        # Block high-risk git (push/clean) regardless of sandbox mode
+        if is_high_risk_git_command(command):
+            return f"Error: {SANDBOX_GIT_HIGH_RISK_MESSAGE}"
 
         sandbox = ensure_sandbox_initialized(runtime)
         if is_local_sandbox(runtime):
