@@ -2,7 +2,7 @@
 
 > 目标：说明 DeerFlow 当前实现里，线程状态、run 生命周期和流式事件桥接是如何协作的，以及为什么它们是 Gateway 能力背后的真正运行时核心。
 >
-> 代码范围：以 `backend/packages/harness/deerflow/agents/thread_state.py` 和 `runtime/` 为主，必要时补充 `agents/middlewares/` 与 `client.py`。
+> 代码范围：以 `backend/packages/harness/deerflow/agents/thread_state.py` 和 `runtime/` 为主。
 
 补充专题：
 
@@ -15,304 +15,352 @@
 
 在 DeerFlow 里，很多能力最终都围绕同一个键工作：`thread_id`。
 
-它同时关联：
+| 能力 | 如何使用 thread_id |
+|------|-------------------|
+| 会话消息历史 | checkpoint 中按 thread_id 索引 |
+| 线程元数据 | store 中按 thread_id 存标题和时间 |
+| 文件目录 | `threads/{thread_id}/user-data/` |
+| 沙箱 | provider 按 thread_id 获取/复用 sandbox |
+| Run 记录 | run_manager 按 thread_id 追踪 inflight run |
+| 子代理 | 继承父 thread_id，共享工作区 |
 
-- 会话消息历史
-- checkpoint 状态
-- store 中的线程元数据
-- 线程对应的 workspace/uploads/outputs 目录
-- sandbox 获取与复用
-- Gateway 的 run 记录
-
-因此 thread 在这里不是前端概念，而是整个 harness runtime 的隔离单元。
+Thread 在这里不是前端概念，而是整个 harness runtime 的隔离单元。
 
 ---
 
 ## 2. `ThreadState`：统一状态载体
 
-`deerflow/agents/thread_state.py` 在 `AgentState` 基础上扩展了几类字段：
+### 2.1 状态字段
 
-- `sandbox`
-- `thread_data`
-- `title`
-- `artifacts`
-- `todos`
-- `uploaded_files`
-- `viewed_images`
+`agents/thread_state.py` 在 `AgentState` 基础上扩展：
 
-这意味着 DeerFlow 并没有把这些运行时信息散落在各 middleware 或工具内部，而是显式纳入 graph state。
+| 字段 | 类型 | 用途 | Reducer |
+|------|------|------|---------|
+| `sandbox` | `SandboxState` | 当前沙箱 ID 和状态 | 无（覆盖） |
+| `thread_data` | `ThreadDataState` | 线程级目录路径 | 无（覆盖） |
+| `title` | `str` | 线程标题 | 无（覆盖） |
+| `artifacts` | `list[dict]` | 产物文件列表 | `merge_artifacts`（追加去重） |
+| `todos` | `list[dict]` | 待办事项 | 无（覆盖） |
+| `uploaded_files` | `list[str]` | 上传文件列表 | 无（覆盖） |
+| `viewed_images` | `dict[str, Any]` | 已查看图像 | `merge_viewed_images` |
 
-这样做至少有三个直接收益：
+### 2.2 统一状态的好处
 
-1. 中间件之间可以通过统一 state 协作
-2. checkpoint 可以直接持久化更完整的线程上下文
-3. UI 所需的衍生信息可以从 state 读取，而不是靠额外旁路协议
+1. **中间件协作**：多个 middleware 通过统一 state 读写，不依赖隐式全局变量
+2. **Checkpoint 持久化**：checkpointer 直接序列化完整状态
+3. **UI 对接**：前端所需的衍生信息从 state 读取，不需要额外协议
+
+### 2.3 Reducer 的并发语义
+
+Reducer 不是代码整洁，而是显式定义状态合并规则：
+
+```python
+def merge_artifacts(left: list[dict], right: list[dict]) -> list[dict]:
+    """追加并去重，相同 path 只保留最新"""
+    seen = {a["path"]: a for a in left}
+    seen.update({a["path"]: a for a in right})
+    return list(seen.values())
+
+def merge_viewed_images(left: dict, right: dict) -> dict:
+    """合并；空字典代表清空"""
+    if not right:
+        return {}
+    return {**left, **right}
+```
+
+如果没有 reducer，多个工具或多个回合同时更新这些字段时，很容易互相覆盖。
 
 ---
 
-## 3. Reducer 不是细节，而是并发语义
+## 3. `ThreadDataMiddleware`：逻辑线程映射成真实目录
 
-`ThreadState` 里有两个字段带 reducer：
+### 3.1 做什么
 
-- `artifacts -> merge_artifacts`
-- `viewed_images -> merge_viewed_images`
+根据当前 `thread_id` 计算线程级目录信息，写入 `state["thread_data"]`：
 
-它们的意义不是代码整洁，而是显式定义状态合并规则。
+| 字段 | 虚拟路径 | 物理路径 |
+|------|----------|----------|
+| `workspace_path` | `/mnt/user-data/workspace` | `threads/{tid}/user-data/workspace/` |
+| `uploads_path` | `/mnt/user-data/uploads` | `threads/{tid}/user-data/uploads/` |
+| `outputs_path` | `/mnt/user-data/outputs` | `threads/{tid}/user-data/outputs/` |
 
-例如：
+### 3.2 Lazy Init
 
-- `artifacts` 需要追加并去重
-- `viewed_images` 需要支持 merge，也需要支持“空字典代表清空”
-
-如果没有 reducer，多个工具或多个 middleware 在同一轮更新这些字段时，很容易互相覆盖。
-
-所以 reducer 本质上是在把“状态写冲突怎么解决”内建到 state schema 里。
-
----
-
-## 4. `ThreadDataMiddleware`：把逻辑线程映射成真实目录
-
-`ThreadDataMiddleware` 会根据当前 `thread_id` 计算线程级目录信息，并写入 `state["thread_data"]`。
-
-典型包括：
-
-- `workspace_path`
-- `uploads_path`
-- `outputs_path`
-
-默认是 `lazy_init=True`，意味着：
+默认 `lazy_init=True`：
 
 - 先建立路径语义
-- 不一定立刻创建全部目录
+- 不立刻创建全部目录
 
-这样做的好处是减少不必要的 IO，同时让后续 sandbox、uploads、文件工具都共享同一份路径上下文。
+好处是减少不必要的 IO，后续 sandbox、uploads、文件工具都共享同一份路径上下文。
 
 ---
 
-## 5. `SandboxMiddleware`：把执行环境挂进 state
+## 4. `SandboxMiddleware`：执行环境挂进 state
 
-`SandboxMiddleware` 的职责不是执行命令本身，而是：
+### 4.1 职责
+
+不是执行命令本身，而是：
 
 1. 根据 provider 获取或复用 `sandbox_id`
 2. 把 `sandbox_id` 写入 `state["sandbox"]`
 3. 在 `after_agent()` 里调用 provider 的 `release(...)`
 
-这个设计把“执行能力”和“资源生命周期”拆开了：
+### 4.2 设计分离
 
-- 工具只关心当前 state 里有没有 sandbox
-- provider 决定资源是立即释放、warm pool 复用，还是 no-op
+| 关注点 | 负责方 |
+|--------|--------|
+| "能做什么" | `Sandbox`（执行命令、读写文件） |
+| "怎么管理生命周期" | `SandboxProvider`（获取、缓存、释放） |
 
-所以 sandbox 的抽象边界并不在工具，而在 middleware + provider。
+工具只关心当前 state 里有没有 sandbox；provider 决定资源是立即释放、warm pool 复用，还是 no-op。
 
----
+### 4.3 Release 的语义
 
-## 6. `RunManager`：run 生命周期控制器
+`provider.release(sandbox_id)` 不是一定真正释放：
 
-`deerflow/runtime/runs/manager.py` 当前实现的是一个内存型 run registry。
-
-每个 `RunRecord` 记录的核心字段包括：
-
-- `run_id`
-- `thread_id`
-- `status`
-- `on_disconnect`
-- `multitask_strategy`
-- `abort_event`
-- `abort_action`
-- `task`
-- `error`
-
-这说明 run 在 DeerFlow 里不是一次裸 `asyncio.Task`，而是有显式状态机的对象。
-
-### 6.1 `create_or_reject()` 的意义
-
-这个方法不是简单创建 record，而是原子处理“线程上是否已有 inflight run”。
-
-当前支持的策略有：
-
-- `reject`
-- `interrupt`
-- `rollback`
-
-这一步很关键，因为它避免了把并发 run 冲突交给上层调用方自己处理。
-
-### 6.2 `cancel()` 的语义
-
-取消并不只是 `task.cancel()`。
-
-它还会：
-
-- 记录 `abort_action`
-- 设置 `abort_event`
-- 更新 run 状态和时间戳
-
-也就是说，DeerFlow 把“取消”视作显式运行时事件，而不是隐式任务异常。
+| Provider | release 行为 |
+|----------|-------------|
+| `LocalSandboxProvider` | no-op（单例常驻） |
+| `AioSandboxProvider` | 放回 warm pool 或真正销毁 |
 
 ---
 
-## 7. `run_agent()`：真正驱动 graph 执行的地方
+## 5. `RunManager`：run 生命周期控制器
 
-`deerflow/runtime/runs/worker.py::run_agent(...)` 是实际的后台执行函数。
+### 5.1 内存型 Registry
 
-它大致做这些事：
+`runtime/runs/manager.py` 管理运行中的 run 记录：
 
-1. 把 run 状态改成 `running`
-2. 读取 pre-run checkpoint 信息，给回滚预留钩子
-3. 通过 bridge 发布 metadata
-4. 构造 `Runtime(context={"thread_id": ...}, store=store)`
-5. 把 runtime 注入 `config["configurable"]["__pregel_runtime"]`
-6. 用 `agent_factory(config=runnable_config)` 动态构建 agent
-7. 挂上 checkpointer / store
-8. 调 `agent.astream(...)` 逐步消费图输出
-9. 把输出序列化后发往 `StreamBridge`
-10. 根据 abort 或异常，写最终状态并发送 `end`
+| 字段 | 类型 | 用途 |
+|------|------|------|
+| `run_id` | `str` | 唯一标识 |
+| `thread_id` | `str` | 所属线程 |
+| `status` | `RunStatus` | pending/running/success/interrupted/error |
+| `on_disconnect` | `DisconnectMode` | 断开连接时的行为 |
+| `multitask_strategy` | `str` | reject/interrupt/rollback |
+| `abort_event` | `asyncio.Event` | 取消信号 |
+| `abort_action` | `str` | 取消后执行的动作 |
+| `task` | `asyncio.Task` | 实际执行的协程 |
+| `error` | `str | None` | 错误信息 |
 
-这一层是 DeerFlow 能同时做到“可流式、可取消、可恢复”的关键。
-
----
-
-## 8. 为什么要自己注入 `Runtime`
-
-在 `run_agent()` 里，代码手动构造了：
+### 5.2 `create_or_reject()` 原子处理并发
 
 ```python
-Runtime(context={"thread_id": thread_id}, store=store)
+async def create_or_reject(self, thread_id, strategy="reject"):
+    # 1. 检查同线程是否有 inflight run
+    # 2. 如果有:
+    #    - reject:  抛 ConflictError
+    #    - interrupt: 取消当前 run
+    #    - rollback: 取消 + 回滚 checkpoint
+    # 3. 如果没有: 创建新 run 记录
 ```
 
-并写入：
+这一步避免了把并发 run 冲突交给上层调用方自己处理。
+
+### 5.3 `cancel()` 的语义
+
+取消不只是 `task.cancel()`：
+
+1. 设置 `abort_event`（通知 worker 停止）
+2. 记录 `abort_action`（停止后做什么）
+3. 更新 run 状态和时间戳
+
+DeerFlow 把"取消"视作显式运行时事件，而不是隐式任务异常。
+
+---
+
+## 6. `run_agent()`：真正驱动 graph 执行的地方
+
+`runtime/runs/worker.py::run_agent(...)` 是后台执行函数。
+
+### 6.1 执行步骤
+
+```text
+run_agent(thread_id, messages, config, bridge, checkpointer, store, ...)
+  |
+  +-- 1. 标记 run 为 running
+  |
+  +-- 2. 捕获 pre-run checkpoint（rollback 用）
+  |     pre_run_checkpoint_id = get_latest_checkpoint_id(checkpointer, thread_id)
+  |
+  +-- 3. 通过 bridge 发布 metadata 事件
+  |     await bridge.publish(run_id, {"type": "metadata", ...})
+  |
+  +-- 4. 构造 LangGraph Runtime
+  |     runtime = Runtime(context={"thread_id": thread_id}, store=store)
+  |     config["configurable"]["__pregel_runtime"] = runtime
+  |
+  +-- 5. 动态构建 agent
+  |     agent = agent_factory(config=runnable_config)
+  |     agent.checkpointer = checkpointer
+  |     agent.store = store
+  |
+  +-- 6. 执行图
+  |     async for chunk in agent.astream(messages, config):
+  |         event = serialize(chunk)
+  |         await bridge.publish(run_id, event)
+  |
+  +-- 7. 结束处理
+  |     正常: status = success
+  |     Abort + rollback: 恢复 pre-run checkpoint
+  |     异常: status = error
+  |
+  +-- 8. 发送 end 事件
+  |     await bridge.publish_end(run_id)
+```
+
+### 6.2 为什么要自己注入 `Runtime`
+
+LangGraph CLI 会自动处理部分 runtime context，但 DeerFlow 作为自定义 Gateway/worker，需要自己补上：
 
 ```python
+runtime = Runtime(context={"thread_id": thread_id}, store=store)
 config["configurable"]["__pregel_runtime"] = runtime
 ```
 
-原因是：
-
-- LangGraph CLI 会自动处理部分 runtime context
-- DeerFlow 作为自定义 Gateway/worker，需要自己补上这层注入
-
-这一步之后，middleware 和工具才能稳定拿到：
-
-- `thread_id`
-- `store`
-- runtime context
-
-所以这不是兼容性细节，而是 DeerFlow 自己运行 LangGraph 时必须补齐的 glue code。
+这一步之后，middleware 和工具才能稳定拿到 `thread_id`、`store`、runtime context。
 
 ---
 
-## 9. StreamBridge：把执行侧和 SSE 消费侧解耦
+## 7. StreamBridge：生产与消费解耦
 
-`StreamBridge` 的抽象作用是把：
+### 7.1 抽象作用
 
-- graph 执行期间产生的事件
-- HTTP SSE 或其他订阅方消费的事件
+把 graph 执行侧的事件生产和 HTTP SSE 侧的事件消费隔离开。
 
-隔离开。
+### 7.2 `MemoryStreamBridge` 核心结构
 
-默认实现 `MemoryStreamBridge` 的核心结构是：
+```python
+class MemoryStreamBridge(StreamBridge):
+    def __init__(self):
+        self._queues: dict[str, asyncio.Queue] = {}  # run_id → queue
+        self._event_ids: dict[str, int] = {}         # run_id → counter
 
-- 每个 `run_id` 一条 `asyncio.Queue`
-- 发布时生成单调递增 event id
-- 订阅时支持 heartbeat
-- 结束时发 `END_SENTINEL`
+    async def publish(self, run_id: str, event: dict):
+        queue = self._queues[run_id]
+        event["id"] = self._event_ids[run_id]
+        self._event_ids[run_id] += 1
+        await queue.put(event)
 
-这意味着 DeerFlow 的流式能力不是“直接在 FastAPI 里边跑边写”，而是先经过一个中间桥。
+    async def subscribe(self, run_id: str):
+        queue = self._queues[run_id]
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_INTERVAL)
+                yield event
+                if event.get("type") == "end":
+                    break
+            except asyncio.TimeoutError:
+                yield {"type": "heartbeat"}
+```
 
----
+### 7.3 关键细节
 
-## 10. `MemoryStreamBridge` 的几个关键细节
+| 特性 | 说明 |
+|------|------|
+| 按 run 隔离 | 每个 run 一条独立队列，不互相污染 |
+| 心跳 | 超时后发 `HEARTBEAT_SENTINEL`，防止 SSE 超时断开 |
+| END_SENTINEL | 强保证送达，队列满时也会为 END 让路 |
+| Event ID | 单调递增，用于未来 replay 支持 |
 
-### 10.1 队列按 run 隔离
+### 7.4 END_SENTINEL 为什么优先级最高
 
-每个 run 一条独立队列，保证不同请求的流式事件不会相互污染。
+如果 END 丢了：
 
-### 10.2 心跳不是可有可无
-
-`subscribe()` 在超时后会发 `HEARTBEAT_SENTINEL`，避免 SSE 长连接因为长时间无数据而被误判死亡。
-
-### 10.3 `END_SENTINEL` 必须强保证送达
+- 客户端会一直挂起
+- run 相关资源不容易回收
 
 `publish_end()` 在队列满时会主动驱逐旧事件，也要为 END 让路。
 
-这是个很重要的工程选择，因为如果 END 丢了：
+---
 
-- 客户端会一直挂起
-- run 相关资源也更容易泄漏
+## 8. Checkpointer、Store 与 RunManager 的分工
 
-说明 DeerFlow 在流式链路里把“正确结束”优先级放得很高。
+| 组件 | 职责 | 生命周期 | 后端 |
+|------|------|----------|------|
+| **Checkpointer** | 图状态持久化和恢复 | 长期 | memory / sqlite / postgres |
+| **Store** | 线程元数据、标题、索引 | 长期 | memory / sqlite / postgres |
+| **RunManager** | 当前运行中的 run 控制面 | 进程内 | 内存 |
+
+### 8.1 数据流关系
+
+```text
+Agent 执行
+  → Checkpointer 保存每一步图状态
+  → Store 保存线程元数据（通过 Runtime 注入）
+  → RunManager 跟踪运行状态
+
+前端查询
+  → /api/threads 读 Store
+  → /api/threads/{id}/messages 读 Checkpointer
+  → /api/runs/{id}/status 读 RunManager
+```
+
+### 8.2 标题同步补偿
+
+`TitleMiddleware` 把标题写到 checkpoint 状态里；线程搜索接口读的是 store。
+
+所以 run 结束后 Gateway 需要补偿同步：
+
+```python
+# services.py
+async def _sync_thread_title_after_run(thread_id, checkpointer, store):
+    # 从 checkpoint 读取标题
+    title = get_title_from_checkpoint(checkpointer, thread_id)
+    # 回写到 store
+    await update_thread_in_store(store, thread_id, {"title": title})
+```
 
 ---
 
-## 11. SSE 并不是流式能力本体
+## 9. SSE 不是流式能力本体
 
 从实现看，SSE 只是消费 `StreamBridge` 的一种协议适配层。
 
-真正关键的是 harness 内部这三层：
+真正关键的是 harness 内部三层：
 
-1. `run_agent()` 负责生产事件
-2. `StreamBridge` 负责缓冲和桥接
-3. Gateway 才把这些事件转成 HTTP SSE
+| 层 | 职责 |
+|------|------|
+| `run_agent()` | 生产事件 |
+| `StreamBridge` | 缓冲和桥接 |
+| Gateway | 转成 HTTP SSE |
 
-所以如果未来要接别的消费侧，例如 WebSocket、消息总线、进程内订阅，核心运行时基本不需要重写。
-
----
-
-## 12. Checkpointer、Store 与 RunManager 的分工
-
-这三者很容易混，但职责其实不同。
-
-### 12.1 Checkpointer
-
-负责 graph state 持久化和线程恢复。
-
-### 12.2 Store
-
-负责线程元数据、标题、索引等更应用层的数据。
-
-### 12.3 RunManager
-
-负责当前运行中的 run 生命周期，不是长期存储。
-
-因此它们更准确的关系是：
-
-- checkpointer：图执行历史
-- store：应用级线程记录
-- run manager：进程内运行控制面
+如果未来接 WebSocket、消息总线、进程内订阅，核心运行时基本不需要重写。
 
 ---
 
-## 13. 当前实现的边界
+## 10. 当前实现的边界
 
-从代码看，运行时层已经比较完整，但也有几个边界需要明确。
+### 10.1 RunManager 是内存型
 
-### 13.1 `RunManager` 仍是内存型
+进程重启后 inflight run registry 不保留。
 
-这意味着进程重启后 inflight run registry 不保留。
+### 10.2 Rollback 语义预留
 
-### 13.2 `rollback` 语义还预留在位
+`run_agent()` 已记录 `pre_run_checkpoint_id`，但真正的 checkpoint 回滚逻辑还没有完全补完。
 
-`run_agent()` 已记录 `pre_run_checkpoint_id`，但真正的 checkpoint 回滚逻辑还没有补完。
+### 10.3 MemoryStreamBridge 没有 replay
 
-### 13.3 `MemoryStreamBridge` 没有 replay
+`last_event_id` 目前接受但忽略，还不是可追放的 durable event log。
 
-`last_event_id` 目前接受但忽略，说明它还不是可追放的 durable event log。
+### 10.4 单进程运行时
 
-这些边界不影响当前 Gateway 工作，但决定了它更接近单进程运行时，而不是分布式 durable runtime。
+更接近单进程运行时，而不是分布式 durable runtime。
 
 ---
 
-## 14. 总结
+## 11. 总结
 
-DeerFlow 当前运行时设计可以压缩成一句话：
+DeerFlow 当前运行时设计：
 
 > `ThreadState` 负责统一状态，`RunManager` 负责生命周期控制，`StreamBridge` 负责把图执行变成可消费的流。
 
-三者配合后，才有了上层看到的这些能力：
+三者配合后，才有了：
 
-- 同线程隔离
-- 可取消 run
-- 状态可恢复
-- SSE 流式输出
-- 工具与中间件共享上下文
+- 同线程隔离（RunManager 的并发策略）
+- 可取消 run（abort_event + abort_action）
+- 状态可恢复（checkpoint rollback 预留）
+- SSE 流式输出（StreamBridge 桥接）
+- 工具与中间件共享上下文（ThreadState 统一状态）
 
-所以如果要理解 Gateway 为什么能工作，真正要看的不是 HTTP 层，而是这里这套 runtime 骨架。
+理解 Gateway 为什么能工作，真正要看的不是 HTTP 层，而是这套 runtime 骨架。
